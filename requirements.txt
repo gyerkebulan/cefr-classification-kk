@@ -9,3 +9,4 @@ gradio
 awesome-align
 simalign
 python-dotenv
+pyyaml

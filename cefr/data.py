@@ -1,27 +1,29 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 from typing import Mapping
 
 import pandas as pd
 
+
+CEFR_LEVELS: tuple[str, ...] = ("A1", "A2", "B1", "B2", "C1", "C2")
 DEFAULT_RUS_CEFR = Path("data/cefr/russian_cefr_sample.csv")
 
 
+@dataclass(slots=True)
 class RussianCefrRepository:
-    """Lazy loader and accessor for the Russian word → CEFR mapping."""
+    """Lazy loader for the Russian lexicon → CEFR mapping."""
 
-    def __init__(self, path: str | Path = DEFAULT_RUS_CEFR) -> None:
-        self._path = Path(path)
+    path: Path = DEFAULT_RUS_CEFR
 
-    @property
-    def path(self) -> Path:
-        return self._path
+    def __post_init__(self) -> None:
+        self.path = Path(self.path)
 
     @property
     def mapping(self) -> Mapping[str, str]:
-        return _load_russian_cefr_mapping(self._path)
+        return _load_russian_cefr_mapping(self.path)
 
     def lookup_level(self, token: str) -> str:
         token_norm = token.strip().lower()
@@ -41,4 +43,4 @@ def _load_russian_cefr_mapping(path: Path) -> Mapping[str, str]:
     }
 
 
-__all__ = ["DEFAULT_RUS_CEFR", "RussianCefrRepository"]
+__all__ = ["RussianCefrRepository", "DEFAULT_RUS_CEFR", "CEFR_LEVELS"]

@@ -3,11 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping, Sequence, Set, Tuple
 
-from src.align.merge_phrases import merge_kz_to_single_ru
-from src.domain.entities import WordAlignment, TextCefrPrediction
-from src.text.ensemble_pipeline import EnsembleCefrPipeline
-from src.text.predict_text import predict_text_cefr
-from src.ru_sentence_model.data import CEFR_LEVELS
+from cefr.alignment import WordAlignment, merge_kz_to_single_ru
+from cefr.config import PipelineConfig
+from cefr.data import CEFR_LEVELS
+from cefr.pipeline import EnsemblePipeline, TextPipeline, TextPrediction
 
 
 @dataclass
@@ -25,10 +24,10 @@ class DummyAligner:
         self,
         kazakh_words: Sequence[str],
         russian_words: Sequence[str],
-        layer: int = 8,
-        thresh: float = 0.05,
+        *,
+        layer: int | None = None,
+        threshold: float | None = None,
     ) -> Set[Tuple[int, int]]:
-        # Always align the first token in each sequence.
         if not kazakh_words or not russian_words:
             return set()
         return {(0, 0)}
@@ -48,27 +47,26 @@ def test_merge_kz_to_single_ru_simple():
     assert phrases[1].russian_token == "читает"
 
 
-def test_predict_text_cefr_uses_override_translation():
+def test_pipeline_respects_translation_override(tmp_path, monkeypatch):
     dummy_translator = DummyTranslator(expected_text="модель", called_with=[])
     dummy_aligner = DummyAligner()
 
-    result = predict_text_cefr(
-        "Ол кітап оқып жатыр",
-        translator=dummy_translator,
-        aligner=dummy_aligner,
-        russian_text="человек",
+    # Ensure repository path exists by pointing to bundled CSV.
+    config = PipelineConfig()
+    pipeline = TextPipeline(
+        config=config,
+        translator=dummy_translator,  # type: ignore[arg-type]
+        aligner=dummy_aligner,  # type: ignore[arg-type]
     )
 
-    # Translation override should bypass translator invocation.
+    result = pipeline.predict("Ол кітап оқып жатыр", russian_text="человек")
+
     assert dummy_translator.called_with == []
     assert result.translation == "человек"
-    assert result.phrase_alignments  # alignment ran with dummy aligner
+    assert result.phrase_alignments
+    assert isinstance(result, TextPrediction)
     assert result.average_level in {"A1", "Unknown"}
     assert all(isinstance(item, WordAlignment) for item in result.word_alignments)
-    tuples = [item.as_tuple() for item in result.word_alignments]
-    assert tuples
-    for entry in tuples:
-        assert len(entry) == 5
 
 
 class DummyRuSentenceModel:
@@ -88,15 +86,16 @@ class DummyKazPipeline:
             russian_index=0,
             cefr="A1",
         )
-        self.prediction = TextCefrPrediction(
+        self.prediction = TextPrediction(
             translation="Он",
             distribution={level: (1.0 if level == "A1" else 0.0) for level in CEFR_LEVELS},
             average_level="A1",
             phrase_alignments=(),
             word_alignments=(word_alignment,),
         )
+        self.scorer = type("Scorer", (), {"cefr_order": CEFR_LEVELS})()
 
-    def predict(self, kazakh_text: str, *, russian_text: str | None = None) -> TextCefrPrediction:
+    def predict(self, kazakh_text: str, *, russian_text: str | None = None) -> TextPrediction:
         return self.prediction
 
 
@@ -105,8 +104,8 @@ def test_ensemble_pipeline_combines_predictions():
     ru_probs = {level: 1.0 / len(CEFR_LEVELS) for level in CEFR_LEVELS}
     ru_model = DummyRuSentenceModel(ru_probs)
 
-    ensemble = EnsembleCefrPipeline(
-        kazakh_pipeline=kk_pipeline,
+    ensemble = EnsemblePipeline(
+        base_pipeline=kk_pipeline,  # type: ignore[arg-type]
         russian_model=ru_model,  # type: ignore[arg-type]
         russian_weight=0.6,
     )

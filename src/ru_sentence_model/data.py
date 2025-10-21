@@ -12,9 +12,9 @@ try:
 except ImportError:  # pragma: no cover
     import pymorphy2 as pymorphy
 
-from src.align.analysis import is_informative
+from cefr.alignment import is_informative
+from cefr.data import CEFR_LEVELS
 
-CEFR_LEVELS: tuple[str, ...] = ("A1", "A2", "B1", "B2", "C1", "C2")
 LEVEL_TO_INDEX: Mapping[str, int] = {level: idx for idx, level in enumerate(CEFR_LEVELS)}
 
 

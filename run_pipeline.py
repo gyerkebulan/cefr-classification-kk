@@ -1,5 +1,7 @@
 import argparse
-from src.text.predict_text import predict_text_cefr
+
+from cefr import TextPipeline, load_config
+
 
 def main():
     ap = argparse.ArgumentParser()
@@ -10,12 +12,14 @@ def main():
         help="Russian translation (optional, skips automatic translation when provided)",
     )
     args = ap.parse_args()
-    result = predict_text_cefr(args.text_kz, russian_text=args.text_ru)
-    print("Translation:", result.translation)
-    print("Text CEFR:", result.average_level)
-    print("Distribution:", result.distribution)
+    config = load_config()
+    pipeline = TextPipeline(config=config.pipeline)
+    prediction = pipeline.predict(args.text_kz, russian_text=args.text_ru)
+    print("Translation:", prediction.translation)
+    print("Text CEFR:", prediction.average_level)
+    print("Distribution:", dict(prediction.distribution))
     print("Phrase alignments (KZ → RU):")
-    for phrase in result.phrase_alignments:
+    for phrase in prediction.phrase_alignments:
         print(f'  "{phrase.kazakh_phrase}" -> "{phrase.russian_token}"')
 
 if __name__ == "__main__":

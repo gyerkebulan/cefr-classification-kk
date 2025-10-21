@@ -1,0 +1,13 @@
+pipeline:
+  translator:
+    model_name: issai/tilmash
+    device: null
+  alignment:
+    model_name: aneuraz/awesome-align-with-co
+    device: null
+    layer: 8
+    threshold: 0.05
+  russian_cefr_path: data/cefr/russian_cefr_sample.csv
+  russian_model_dir: models/ru_cefr_sentence
+  russian_weight: 0.6
+use_ensemble: false

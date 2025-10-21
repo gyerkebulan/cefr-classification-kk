@@ -2,43 +2,45 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from src.align.mutual_align import EmbeddingAligner
-from src.data.repositories import DEFAULT_RUS_CEFR, RussianCefrRepository
-from src.domain.entities import TextCefrPrediction
-from src.domain.services import (
-    AlignmentService,
-    CefrScorer,
-    TextCefrPipeline,
-    TranslationService,
-)
-from src.translation.translator import Translator
-from src.text.ensemble_pipeline import EnsembleCefrPipeline
-from src.ru_sentence_model.model import RuSentenceCefrModel
+from cefr.config import PipelineConfig
+from cefr.data import RussianCefrRepository
+from cefr.models import RuSentenceCefrModel
+from cefr.pipeline import EnsemblePipeline, TextPipeline
+from cefr.translation import Translator
+from cefr.alignment import EmbeddingAligner
+
+
+def _build_pipeline(
+    rus_cefr_path: Path,
+    translator: Translator | None,
+    aligner: EmbeddingAligner | None,
+) -> TextPipeline:
+    config = PipelineConfig(russian_cefr_path=str(rus_cefr_path))
+    repository = RussianCefrRepository(rus_cefr_path)
+    return TextPipeline(
+        config=config,
+        translator=translator,
+        aligner=aligner,
+        repository=repository,
+    )
 
 
 def predict_text_cefr(
     kaz_text: str,
-    rus_cefr_path: str | Path = DEFAULT_RUS_CEFR,
+    rus_cefr_path: str | Path = Path("data/cefr/russian_cefr_sample.csv"),
     translator: Translator | None = None,
     aligner: EmbeddingAligner | None = None,
     *,
     russian_text: str | None = None,
-) -> TextCefrPrediction:
-    translation_service = TranslationService(translator)
-    alignment_service = AlignmentService(aligner)
-    scorer = CefrScorer(RussianCefrRepository(rus_cefr_path))
-    pipeline = TextCefrPipeline(
-        translation_service=translation_service,
-        alignment_service=alignment_service,
-        scorer=scorer,
-    )
+):
+    pipeline = _build_pipeline(Path(rus_cefr_path), translator, aligner)
     return pipeline.predict(kaz_text, russian_text=russian_text)
 
 
 def predict_text_cefr_ensemble(
     kaz_text: str,
     *,
-    rus_cefr_path: str | Path = DEFAULT_RUS_CEFR,
+    rus_cefr_path: str | Path = Path("data/cefr/russian_cefr_sample.csv"),
     translator: Translator | None = None,
     aligner: EmbeddingAligner | None = None,
     russian_text: str | None = None,
@@ -46,20 +48,13 @@ def predict_text_cefr_ensemble(
     russian_model: RuSentenceCefrModel | None = None,
     russian_weight: float = 0.6,
 ) -> dict[str, object]:
-    translation_service = TranslationService(translator)
-    alignment_service = AlignmentService(aligner)
-    scorer = CefrScorer(RussianCefrRepository(rus_cefr_path))
-    base_pipeline = TextCefrPipeline(
-        translation_service=translation_service,
-        alignment_service=alignment_service,
-        scorer=scorer,
-    )
+    pipeline = _build_pipeline(Path(rus_cefr_path), translator, aligner)
     if russian_model is None:
         if russian_model_checkpoint is None:
             raise ValueError("Either russian_model or russian_model_checkpoint must be provided.")
         russian_model = RuSentenceCefrModel.from_pretrained(russian_model_checkpoint)
-    ensemble = EnsembleCefrPipeline(
-        kazakh_pipeline=base_pipeline,
+    ensemble = EnsemblePipeline(
+        base_pipeline=pipeline,
         russian_model=russian_model,
         russian_weight=russian_weight,
     )

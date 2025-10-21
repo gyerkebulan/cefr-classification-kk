@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 from typing import Sequence
 
-from cefr.training import TabularTrainingConfig, train_tabular_model
+from .tabular import TabularTrainingConfig, train_tabular_model
 
 
 def parse_args(args: Sequence[str] | None = None) -> TabularTrainingConfig:

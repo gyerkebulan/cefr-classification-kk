@@ -92,3 +92,15 @@ def build_silver_labels(
 
 
 __all__ = ["build_silver_labels"]
+
+
+def main() -> None:
+    build_silver_labels(
+        parallel_csv=Path("data/parallel/kazparc_kz_ru.csv"),
+        rus_cefr=Path("data/cefr/russian_cefr_sample.csv"),
+        out_csv=Path("data/labels/silver_word_labels.csv"),
+    )
+
+
+if __name__ == "__main__":
+    main()

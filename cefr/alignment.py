@@ -57,10 +57,10 @@ def _resolve_device(device: str | torch.device | None) -> torch.device:
 
 
 @lru_cache(maxsize=4)
-def _load_resources(config: AlignmentConfig) -> AlignmentResources:
-    device = _resolve_device(config.device)
-    tokenizer = AutoTokenizer.from_pretrained(config.model_name, use_fast=True)
-    model = AutoModel.from_pretrained(config.model_name)
+def _load_resources(model_name: str, device_hint: str | None) -> AlignmentResources:
+    device = _resolve_device(device_hint)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+    model = AutoModel.from_pretrained(model_name)
     model.eval()
     model.to(device)
     return AlignmentResources(tokenizer=tokenizer, model=model, device=device)
@@ -71,7 +71,7 @@ class EmbeddingAligner:
 
     def __init__(self, config: AlignmentConfig | None = None) -> None:
         self.config = config or AlignmentConfig()
-        resources = _load_resources(self.config)
+        resources = _load_resources(self.config.model_name, self.config.device)
         self.tokenizer = resources.tokenizer
         self.model = resources.model
         self.device = resources.device

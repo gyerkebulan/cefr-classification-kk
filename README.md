@@ -20,13 +20,13 @@ pip install -r requirements.txt
 
 ### 2. Загрузка параллельного корпуса KazParC
 ```bash
-python -m src.data.download_parallel
+python -m cefr.data.download
 ```
 Команда сохранит файл `data/parallel/kazparc_kz_ru.csv` и вернет путь к нему.
 
 ### 3. Построение «серебряных» CEFR-меток
 ```bash
-python -m src.pipeline.build_silver_labels
+python -m cefr.data.silver
 ```
 В результате появится файл `data/labels/silver_word_labels.csv` с парами «казахская фраза → русский перевод → уровень CEFR».
 
@@ -69,21 +69,7 @@ python run_pipeline.py --text_kz "Ол кітап оқып жатыр" --text_ru
      ```  
      Это улучшит качество выравнивания и, как следствие, точность CEFR-оценки.
 
-2. **Классификатор словарных уровней**  
-   - После генерации `data/labels/silver_word_labels.csv` выполните:  
-     ```bash
-     python -m src.models.train_word_transformer
-     ```  
-   - По умолчанию используется компактный трансформер `cointegrated/rubert-tiny2`; веса и токенизатор сохраняются в `models/transformer_word_cefr/`.  
-   - Для инференса доступны хелперы:
-     ```python
-     from pathlib import Path
-     from src.models.predict_transformer_word import predict_transformer_word
-
-     predict_transformer_word("пример", model_dir=Path("models/transformer_word_cefr"))
-     ```
-
-3. **Эксперименты**  
+2. **Эксперименты**  
    - Увеличьте размер русско-CEFR словаря (`data/cefr/russian_cefr_sample.csv`), заменив его на собственный большой список.  
    - Настройте параметры в `config/default.yaml` (модель переводчика, устройство, слой и порог выравнивания, вес русского классификатора).  
    - Добавьте собственные метрики и отчеты, интегрировав функции из `cefr.pipeline` в ваш продукт.
@@ -96,7 +82,6 @@ data/
   parallel/                    # параллельные корпуса
   labels/                      # сгенерированные серебряные метки
 models/
-  transformer_word_cefr/       # сохраненные веса трансформер-классификатора
 notebooks/
   cefr_pipeline_demo.ipynb     # jupyter-скрипт для полного пайплайна
 scripts/
@@ -105,15 +90,16 @@ scripts/
 cefr/
   alignment.py                 # выравнивание и диагностика
   config.py                    # датаклассы и YAML-конфиг
-  data.py                      # словари CEFR
+  data/__init__.py             # словари CEFR
+  data/download.py             # загрузка KazParC
   data/silver.py               # генерация «серебряных» меток
   models/                      # модель русских предложений
   notebook.py                  # утилиты для ноутбуков
   pipeline.py                  # TextPipeline и EnsemblePipeline
   training/                    # обучение табличного классификатора
+  training/tabular_cli.py      # CLI для табличного классификатора
 config/default.yaml            # настройки по умолчанию
 run_pipeline.py                # CLI-пример
-src/                           # совместимые скрипты и утилиты
 tests/                         # smoke-тесты
 ```
 

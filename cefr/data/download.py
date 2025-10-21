@@ -36,5 +36,12 @@ def save_kz_ru(
     return path
 
 
-if __name__ == "__main__":
+__all__ = ["save_kz_ru", "ensure_dir"]
+
+
+def main() -> None:
     save_kz_ru()
+
+
+if __name__ == "__main__":
+    main()

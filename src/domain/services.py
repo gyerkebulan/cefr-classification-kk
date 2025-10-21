@@ -10,7 +10,12 @@ from src.align.mutual_align import (
     SequenceTooLongError,
     get_default_aligner,
 )
-from src.domain.entities import CEFR_ORDER, PhraseAlignment, TextCefrPrediction
+from src.domain.entities import (
+    CEFR_ORDER,
+    PhraseAlignment,
+    TextCefrPrediction,
+    WordAlignment,
+)
 from src.data.repositories import RussianCefrRepository
 from src.translation.translator import Translator, get_translator
 
@@ -131,11 +136,26 @@ class TextCefrPipeline:
         russian_words = _tokenize(translation)
         alignments = self._alignment.align_phrases(kazakh_words, russian_words)
         distribution, avg_level = self._scorer.score_alignments(alignments)
+        word_alignments: list[WordAlignment] = []
+        for phrase in alignments:
+            level = self._scorer.infer_level(phrase.russian_token)
+            for kaz_idx in phrase.kazakh_span:
+                if 0 <= kaz_idx < len(kazakh_words):
+                    word_alignments.append(
+                        WordAlignment(
+                            kazakh_token=kazakh_words[kaz_idx],
+                            russian_token=phrase.russian_token,
+                            kazakh_index=kaz_idx,
+                            russian_index=phrase.russian_index,
+                            cefr=level,
+                        )
+                    )
         return TextCefrPrediction(
             translation=translation,
             distribution=distribution,
             average_level=avg_level,
             phrase_alignments=alignments,
+            word_alignments=tuple(word_alignments),
         )
 
 

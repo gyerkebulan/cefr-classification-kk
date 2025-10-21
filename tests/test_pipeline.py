@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Sequence, Set, Tuple
+from typing import Mapping, Sequence, Set, Tuple
 
 from src.align.merge_phrases import merge_kz_to_single_ru
+from src.domain.entities import WordAlignment, TextCefrPrediction
+from src.text.ensemble_pipeline import EnsembleCefrPipeline
 from src.text.predict_text import predict_text_cefr
+from src.ru_sentence_model.data import CEFR_LEVELS
 
 
 @dataclass
@@ -61,3 +64,56 @@ def test_predict_text_cefr_uses_override_translation():
     assert result.translation == "человек"
     assert result.phrase_alignments  # alignment ran with dummy aligner
     assert result.average_level in {"A1", "Unknown"}
+    assert all(isinstance(item, WordAlignment) for item in result.word_alignments)
+    tuples = [item.as_tuple() for item in result.word_alignments]
+    assert tuples
+    for entry in tuples:
+        assert len(entry) == 5
+
+
+class DummyRuSentenceModel:
+    def __init__(self, mapping: Mapping[str, float]):
+        self._mapping = mapping
+
+    def predict_proba(self, sentence: str) -> Mapping[str, float]:
+        return self._mapping
+
+
+class DummyKazPipeline:
+    def __init__(self) -> None:
+        word_alignment = WordAlignment(
+            kazakh_token="Ол",
+            russian_token="Он",
+            kazakh_index=0,
+            russian_index=0,
+            cefr="A1",
+        )
+        self.prediction = TextCefrPrediction(
+            translation="Он",
+            distribution={level: (1.0 if level == "A1" else 0.0) for level in CEFR_LEVELS},
+            average_level="A1",
+            phrase_alignments=(),
+            word_alignments=(word_alignment,),
+        )
+
+    def predict(self, kazakh_text: str, *, russian_text: str | None = None) -> TextCefrPrediction:
+        return self.prediction
+
+
+def test_ensemble_pipeline_combines_predictions():
+    kk_pipeline = DummyKazPipeline()
+    ru_probs = {level: 1.0 / len(CEFR_LEVELS) for level in CEFR_LEVELS}
+    ru_model = DummyRuSentenceModel(ru_probs)
+
+    ensemble = EnsembleCefrPipeline(
+        kazakh_pipeline=kk_pipeline,
+        russian_model=ru_model,  # type: ignore[arg-type]
+        russian_weight=0.6,
+    )
+
+    prediction = ensemble.predict("Ол кітап оқып жатыр", russian_text="человек")
+
+    assert set(prediction.probabilities.keys()) == set(CEFR_LEVELS)
+    assert abs(sum(prediction.probabilities.values()) - 1.0) < 1e-6
+    assert prediction.translation == "Он"
+    assert prediction.word_alignments

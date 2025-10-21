@@ -22,6 +22,7 @@ try:
 except ImportError:  # pragma: no cover
     import pymorphy2 as pymorphy
 
+from src.align.analysis import is_informative
 from src.align.mutual_align import EmbeddingAligner, get_default_aligner
 from src.data.repositories import DEFAULT_RUS_CEFR, RussianCefrRepository
 from src.domain.services import AlignmentService
@@ -50,6 +51,7 @@ def main(
     aligner: EmbeddingAligner | None = None,
     layer: int = 8,
     thresh: float = 0.05,
+    skip_non_informative: bool = True,
 ) -> Path:
     parallel_csv = Path(parallel_csv)
     rus_cefr = Path(rus_cefr)
@@ -78,6 +80,8 @@ def main(
             continue
         for phrase in phrases:
             token = phrase.russian_token.strip().lower()
+            if skip_non_informative and not is_informative(token):
+                continue
             lemma = _lemmatize(token)
             level = mapping.get(lemma, mapping.get(token, "Unknown"))
             rows.append(

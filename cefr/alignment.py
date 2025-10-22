@@ -269,7 +269,7 @@ def merge_kz_to_single_ru(
     return result
 
 
-NON_WORD_RE = re.compile(r"^(?:\W+|\d[\d\W]*)$")
+NON_WORD_RE = re.compile(r"^(?:\W+|\d[\d\W]*)$") # TODO: Подкорректировать regex для чисто русских/казахских слов
 
 
 def is_informative(token: str) -> bool:

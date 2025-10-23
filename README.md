@@ -21,11 +21,23 @@ python -m cefr.cli word --kaz-word "кітап"
 
 # 3) Kazakh text CEFR classification
 python -m cefr.cli text --kaz-text "Ол кітап оқып жатыр. Бүгін мектепте жаңа тақырып өткен."
+
+# 4) Train word-level CEFR classifier (Russian lexicon)
+python -m cefr.cli train-word --dataset-path data/cefr/russian_cefr_sample.csv --output-dir models/russian_word_cefr
+
+# 5) Train text-level CEFR classifier (bilingual model)
+python -m cefr.cli train-text
 ```
 
 If `--rus-text` / `--rus-word` is omitted, the built-in translator will generate a Russian counterpart automatically (requires the translation model defined in the config).
 
 Use `--pretty` to format JSON output.
+
+The training commands rely on Hugging Face models/datasets. Ensure you have a valid token for any gated models (e.g. `cointegrated/rubert-tiny2`) and install the extras:
+
+```bash
+pip install transformers datasets
+```
 
 ## License
 

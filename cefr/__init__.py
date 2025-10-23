@@ -6,34 +6,15 @@ exact internal layout. The public API is intentionally small; favour these
 entry points instead of importing deep modules.
 """
 
-from .config import (
-    AlignmentConfig,
-    NotebookConfig,
-    PipelineConfig,
-    TranslatorConfig,
-    load_config,
-)
-from .pipeline import (
-    EnsemblePrediction,
-    EnsemblePipeline,
-    TextPipeline,
-)
-from .notebook import (
-    NotebookPrediction,
-    predict_notebook_view,
-    rows_to_dataframe,
-)
+from .config import AlignmentConfig, PipelineConfig, TranslatorConfig, load_config
+from .pipeline import EnsemblePrediction, EnsemblePipeline, TextPipeline
 
 __all__ = [
     "AlignmentConfig",
-    "NotebookConfig",
     "PipelineConfig",
     "TranslatorConfig",
     "load_config",
     "TextPipeline",
     "EnsemblePipeline",
     "EnsemblePrediction",
-    "NotebookPrediction",
-    "predict_notebook_view",
-    "rows_to_dataframe",
 ]

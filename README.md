@@ -1,129 +1,217 @@
-# Пайплайн CEFR для казахско‑русских текстов
+# CEFR Pipelines for Kazakh ↔ Russian
 
-Проект решает задачу оценки сложности текста (CEFR A1–C2) для казахского языка по параллельному переводу на русский. Пайплайн включает перевод, выравнивание слов/фраз, сопоставление с уровнем CEFR и агрегацию на уровне текста. Дополнительно можно обучить классификатор для словарного уровня CEFR, а также текстовый классификатор по английско‑русскому параллельному корпусу.
+This project bundles three practical pipelines that operate on Kazakh↔Russian text pairs:
 
-## Как быстро начать
+1. **Alignment CLI** – return token alignments with probabilities.
+2. **Word CEFR CLI** – predict the CEFR level for a single Kazakh token.
+3. **Text CEFR CLI** – infer the CEFR level of a Kazakh passage.
 
-### 1. Установка окружения
-**Conda (рекомендуется):**
+Each action is exposed as a one‑liner script and can also be invoked from Python.
+
+---
+
+## Quick CLI Reference
+
 ```bash
+# 1) Token alignment
+python -m cefr.cli align --kaz-text "Ол кітап оқып жатыр" --rus-text "Он читает книгу"
+
+# 2) Kazakh word CEFR classification
+python -m cefr.cli word --kaz-word "кітап"
+
+# 3) Kazakh text CEFR classification
+python -m cefr.cli text --kaz-text "Ол кітап оқып жатыр. Бүгін мектепте жаңа тақырып өткен."
+```
+
+If `--rus-text` / `--rus-word` is omitted, the built-in translator will generate a Russian counterpart automatically (requires the translation model defined in the config).
+
+Use `--pretty` to format JSON output.
+
+---
+
+## 1. Alignment Pipeline
+
+Command:
+
+```bash
+python -m cefr.cli align --kaz-text "Ол кітап оқып жатыр" --rus-text "Он читает книгу" --pretty
+```
+
+Example output:
+
+```json
+{
+  "kaz_text": "Ол кітап оқып жатыр",
+  "rus_text": "Он читает книгу",
+  "translation_used": false,
+  "alignments": [
+    {
+      "kaz_index": 0,
+      "kaz_token": "Ол",
+      "rus_index": 0,
+      "rus_token": "Он",
+      "probability": 0.82
+    },
+    {
+      "kaz_index": 1,
+      "kaz_token": "кітап",
+      "rus_index": 2,
+      "rus_token": "книгу",
+      "probability": 0.91
+    }
+  ]
+}
+```
+
+- `probability` is the minimum mutual attention between the aligned tokens (`≈1.0` is a strong match).
+- If `translation_used` is `true`, the script translated the Kazakh text before alignment.
+
+### Programmatic usage
+
+```python
+from cefr import load_config
+from cefr.alignment import EmbeddingAligner
+from cefr.text_utils import tokenize_words
+
+cfg = load_config()
+aligner = EmbeddingAligner(cfg.pipeline.alignment)
+kz_tokens = tokenize_words("Ол кітап оқып жатыр")
+ru_tokens = tokenize_words("Он читает книгу")
+
+diag = aligner.diagnostics(kz_tokens, ru_tokens)
+alignments = [
+    (row["kaz_index"], row["rus_index"], row["joint_prob"])
+    for row in diag.iter_rows(kz_tokens, ru_tokens)
+    if row["is_link"]
+]
+```
+
+---
+
+## 2. Word CEFR Classifier
+
+Command:
+
+```bash
+python -m cefr.cli word --kaz-word "кітап" --pretty
+```
+
+Example output:
+
+```json
+{
+  "kaz_word": "кітап",
+  "rus_token": "книгу",
+  "translation_used": true,
+  "cefr_level": "B1",
+  "confidence": 0.82,
+  "distribution": {
+    "A1": 0.04,
+    "A2": 0.09,
+    "B1": 0.82,
+    "B2": 0.04,
+    "C1": 0.01,
+    "C2": 0.00
+  }
+}
+```
+
+The script translates, aligns, and consults the Russian CEFR lexicon to estimate the level of the supplied word.
+
+### Programmatic usage
+
+```python
+from cefr import load_config
+from cefr.pipeline import TextPipeline
+
+pipeline = TextPipeline(config=load_config().pipeline)
+prediction = pipeline.predict("кітап")
+alignment = prediction.word_alignments[0]
+level = alignment.cefr
+confidence = prediction.distribution.get(level, 0.0)
+```
+
+---
+
+## 3. Text CEFR Classifier
+
+Command:
+
+```bash
+python -m cefr.cli text --kaz-text "Ол кітап оқып жатыр. Бүгін мектепте жаңа тақырып өткен." --pretty
+```
+
+Example output:
+
+```json
+{
+  "kaz_text": "Ол кітап оқып жатыр. Бүгін мектепте жаңа тақырып өткен.",
+  "rus_text": "Он читает книгу. Сегодня в школе прошли новую тему.",
+  "translation_used": true,
+  "cefr_level": "B1",
+  "confidence": 0.73,
+  "distribution": {
+    "A1": 0.02,
+    "A2": 0.12,
+    "B1": 0.73,
+    "B2": 0.11,
+    "C1": 0.02,
+    "C2": 0.00
+  }
+}
+```
+
+The script aggregates phrase-level estimates from the alignment pipeline to deliver an overall CEFR assessment.
+
+### Programmatic usage
+
+```python
+from cefr import load_config
+from cefr.pipeline import TextPipeline
+
+pipeline = TextPipeline(config=load_config().pipeline)
+prediction = pipeline.predict("Ол кітап оқып жатыр. Бүгін мектепте жаңа тақырып өткен.")
+level = prediction.average_level
+confidence = prediction.distribution.get(level, 0.0)
+```
+
+---
+
+## Environment Setup
+
+```bash
+git clone https://github.com/<your-org>/cefr-classification-kk.git
+cd cefr-classification-kk
 conda env create -f environment.yml
 conda activate kazakh_cefr_env
+python -m cefr.data.download      # optional: fetch sample parallel data
 ```
 
-**pip / venv:**
-```bash
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
+Ensure translation models and CEFR resources referenced in `config/default.yaml` are available locally.
 
-### 2. Загрузка параллельного корпуса KazParC
-```bash
-python -m cefr.data.download
-```
-Команда сохранит файл `data/parallel/kazparc_kz_ru.csv` и вернет путь к нему.
+---
 
-### 3. Построение «серебряных» CEFR-меток
-```bash
-python -m cefr.data.silver
-```
-В результате появится файл `data/labels/silver_word_labels.csv` с парами «казахская фраза → русский перевод → уровень CEFR».
-
-### 4. Прогон пайплайна через CLI
-```bash
-python run_pipeline.py --text_kz "Ол кітап оқып жатыр"
-```
-При желании можно передать готовый перевод и миновать автоматический перевод:
-
-```bash
-python run_pipeline.py --text_kz "Ол кітап оқып жатыр" --text_ru "Он читает книгу"
-```
-На выходе: перевод (или переданный перевод), распределение уровней CEFR и список выровненных фраз.
-
-### 5. Jupyter-ноутбук
-В папке `notebooks/` создайте (или обновите) файл `cefr_pipeline_demo.ipynb` содержимым из `main.ipynb`. Ноутбук выполняет все шаги пайплайна в среде Colab/Kaggle или локально, используя GPU при наличии.
-
-## Что происходит внутри
-
-1. **Перевод** — `cefr/translation.py` оборачивает модель `issai/tilmash` и кэширует пайплайн.
-2. **Выранивание** — `cefr/alignment.py` формирует взаимные соответствия слов через `EmbeddingAligner` и предоставляет диагностические метрики.
-3. **Сборка фраз** — функция `merge_kz_to_single_ru` из `cefr/alignment.py` объединяет соседние казахские токены, выровненные с одним русским словом.
-4. **Пайплайн** — `cefr/pipeline.py` реализует `TextPipeline` и `EnsemblePipeline`, которые объединяют перевод, выравнивание и скоринг CEFR.
-5. **Работа с ресурсами** — `cefr/data.py` лениво загружает словарь «русское слово → уровень CEFR».
-6. **Лингвистические признаки** — `cefr/text_features.py` вычисляет длину предложений, количество токенов/типов, соотношение type/token, долю длинных слов, число слогов и другие показатели для каждого текста.
-7. **Серебряные метки** — `cefr/data/silver.py` строит набор слабых меток по параллельному корпусу, дополнительно приводя русские слова к нормальной форме через `pymorphy3`.
-8. **Текстовый классификатор** — `cefr/training/text_classification.py` объединяет TF-IDF по английскому и русскому текстам с лингвистическими признаками и обучает логистическую регрессию.
-
-## Настройка и GPU
-
-- Все модули автоматически переходят на CUDA, если `torch.cuda.is_available()` возвращает `True`. При необходимости можно явно передать `device="cuda"` в `EmbeddingAligner` и `get_translator`.
-- Длинные предложения автоматически пропускаются с предупреждением, чтобы избежать превышения лимита в 512 токенов у BERT.
-
-## Обучение и дообучение
-
-1. **Выравнивание (awesome-align)**  
-   - Сформируйте файл `data/parallel/train.kazru` с строками вида `kazakh ||| russian`.  
-   - Запустите  
-     ```bash
-     bash scripts/train_align.sh
-     bash scripts/align_infer.sh
-     ```  
-     Это улучшит качество выравнивания и, как следствие, точность CEFR-оценки.
-
-2. **Эксперименты**  
-   - Увеличьте размер русско-CEFR словаря (`data/cefr/russian_cefr_sample.csv`), заменив его на собственный большой список.  
-   - Настройте параметры в `config/default.yaml` (модель переводчика, устройство, слой и порог выравнивания, вес русского классификатора).  
-   - Добавьте собственные метрики и отчеты, интегрировав функции из `cefr.pipeline` в ваш продукт.
-
-3. **Текстовая классификация CEFR**  
-   - В папке `data/text/` хранятся корпуса `cefr_leveled_texts.csv` и `en_ru_cefr_corpus.csv`; второй файл содержит ~1500 английских текстов, их переводы на русский и целевые уровни CEFR.  
-   - Лингвистические признаки (число предложений, токенов, типов, слогов и доля длинных слов) вычисляются автоматически в `cefr/text_features.py` и подмешиваются к TF-IDF.  
-   - Выполните
-     ```bash
-     python -m cefr.training.text_classification --output-dir models/en_ru_text_classifier
-     ```
-     чтобы обучить базовый логистический классификатор на TF-IDF и лингвистических признаках.  
-   - В отчете `text_classifier_metrics.json` сохранены метрики, распределение классов и confusion matrix для последующего анализа.
-
-## Структура проекта
+## Repository Layout
 
 ```
-data/
-  cefr/                        # словари CEFR
-  parallel/                    # параллельные корпуса
-  labels/                      # сгенерированные серебряные метки
-models/
-notebooks/
-  cefr_pipeline_demo.ipynb     # jupyter-скрипт для полного пайплайна
-scripts/
-  train_align.sh               # обучение awesome-align
-  align_infer.sh               # применение выравнителя
+alignment.py                  # CLI: token alignment
+word_cefr.py                  # CLI: word-level CEFR scoring
+text_cefr.py                  # CLI: text-level CEFR scoring
 cefr/
-  alignment.py                 # выравнивание и диагностика
-  config.py                    # датаклассы и YAML-конфиг
-  data/__init__.py             # словари CEFR
-  data/download.py             # загрузка KazParC
-  data/silver.py               # генерация «серебряных» меток
-  models/                      # модель русских предложений
-  notebook.py                  # утилиты для ноутбуков
-  pipeline.py                  # TextPipeline и EnsemblePipeline
-  text_features.py             # извлечение лингвистических признаков текста
-  training/                    # обучение табличного и текстового классификаторов
-  training/tabular.py          # табличный классификатор + CLI
-  training/text_classification.py  # текстовый классификатор + CLI
-config/default.yaml            # настройки по умолчанию
-run_pipeline.py                # CLI-пример
-tests/                         # smoke-тесты
+  alignment.py                # alignment utilities
+  cli.py                      # shared CLI entry points (align, word, text)
+  pipeline.py                 # translation + alignment + scoring
+  scoring.py                  # CEFR aggregation logic
+  text_utils.py               # token helpers
+  translation.py              # translation wrapper
+  training/                   # training scripts for advanced models
+data/                         # corpora and generated artefacts
+models/                       # saved models (gitignored)
+notebooks/                    # exploratory workflows
 ```
 
-## Что можно улучшить
+---
 
-- **Расширение корпусов** — подключите дополнительные параллельные источники или собственные наборы данных.
-- **Собственные словари** — обогащайте русско-CEFR словарь полноразмерными леммами или вручную размеченными данными.
-- **Автовalidation** — добавьте pytest с моками для сервисов (`TranslationService`, `AlignmentService`) и интеграционные тесты для пайплайна.
-- **Интерфейс** — заверните `TextCefrPipeline` в REST/CLI-сервис или интерфейс на Streamlit/Gradio.
+## License
 
-## Лицензия
-
-Проект предназначен для исследовательских целей. Соблюдайте лицензии используемых моделей, датасетов и внешних сервисов.
+This project is intended for research use. Respect the licenses of all datasets and upstream models.

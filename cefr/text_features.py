@@ -1,75 +1,34 @@
 import math
 import re
-__all__ = [
-    "TextFeatures",
-    "compute_text_features",
-    "tokenize_words",
-    "extract_numbers",
-    "split_sentences",
-]
+from dataclasses import asdict, dataclass
 
-WORD_PATTERN = re.compile(r"[^\W\d_]+(?:['’\-][^\W\d_]+)*", re.UNICODE)
+from cefr.text_utils import tokenize_words
+
+__all__ = ["TextFeatures", "compute_text_features", "extract_numbers", "split_sentences"]
 NUMBER_PATTERN = re.compile(r"\d+(?:[.,]\d+)*", re.UNICODE)
 SENTENCE_PATTERN = re.compile(r"[^.!?]+(?:[.!?]+|$)", re.MULTILINE)
 VOWELS = "aeiouyаеёиоуыэюя"
 
 
+@dataclass(slots=True)
 class TextFeatures:
-    __slots__ = (
-        "sentence_count",
-        "token_count",
-        "type_count",
-        "average_sentence_length",
-        "type_token_ratio",
-        "number_count",
-        "syllable_count",
-        "average_syllables_per_word",
-        "long_word_percentage",
-    )
-
-    def __init__(
-        self,
-        sentence_count,
-        token_count,
-        type_count,
-        average_sentence_length,
-        type_token_ratio,
-        number_count,
-        syllable_count,
-        average_syllables_per_word,
-        long_word_percentage,
-    ):
-        self.sentence_count = sentence_count
-        self.token_count = token_count
-        self.type_count = type_count
-        self.average_sentence_length = average_sentence_length
-        self.type_token_ratio = type_token_ratio
-        self.number_count = number_count
-        self.syllable_count = syllable_count
-        self.average_syllables_per_word = average_syllables_per_word
-        self.long_word_percentage = long_word_percentage
+    sentence_count: int
+    token_count: int
+    type_count: int
+    average_sentence_length: float
+    type_token_ratio: float
+    number_count: int
+    syllable_count: int
+    average_syllables_per_word: float
+    long_word_percentage: float
 
     def as_dict(self):
-        return {
-            "sentence_count": self.sentence_count,
-            "token_count": self.token_count,
-            "type_count": self.type_count,
-            "average_sentence_length": self.average_sentence_length,
-            "type_token_ratio": self.type_token_ratio,
-            "number_count": self.number_count,
-            "syllable_count": self.syllable_count,
-            "average_syllables_per_word": self.average_syllables_per_word,
-            "long_word_percentage": self.long_word_percentage,
-        }
+        return asdict(self)
 
 
 def split_sentences(text):
     candidates = [match.group().strip() for match in SENTENCE_PATTERN.finditer(text)]
     return [candidate for candidate in candidates if candidate]
-
-
-def tokenize_words(text):
-    return [token for token in WORD_PATTERN.findall(text)]
 
 
 def extract_numbers(text):

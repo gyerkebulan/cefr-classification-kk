@@ -31,6 +31,25 @@ class TextPrediction:
     def word_alignment_tuples(self):
         return list(self.iter_word_alignment_tuples())
 
+    def find_word_alignment(self, word, *, case_insensitive=True):
+        if not self.word_alignments:
+            return None
+        target = word.lower() if case_insensitive else word
+        for alignment in self.word_alignments:
+            token = alignment.kazakh_token
+            token_cmp = token.lower() if case_insensitive else token
+            if token_cmp == target:
+                return alignment
+        return None
+
+    def level_for_word(self, word, *, case_insensitive=True):
+        alignment = self.find_word_alignment(word, case_insensitive=case_insensitive)
+        if alignment is None:
+            return None
+        level = alignment.cefr
+        confidence = float(self.distribution.get(level, 0.0))
+        return level, confidence, alignment
+
 
 class TextPipeline:
     """Translate, align and score Kazakh text."""

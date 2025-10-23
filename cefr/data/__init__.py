@@ -1,30 +1,25 @@
-from __future__ import annotations
-
-from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Mapping
 
 import pandas as pd
 
-CEFR_LEVELS: tuple[str, ...] = ("A1", "A2", "B1", "B2", "C1", "C2")
+CEFR_LEVELS = ("A1", "A2", "B1", "B2", "C1", "C2")
 DEFAULT_RUS_CEFR = Path("data/cefr/russian_cefr_sample.csv")
 
 
-@dataclass(slots=True)
 class RussianCefrRepository:
     """Lazy loader for the Russian lexicon → CEFR mapping."""
 
-    path: Path = DEFAULT_RUS_CEFR
+    __slots__ = ("path",)
 
-    def __post_init__(self) -> None:
-        self.path = Path(self.path)
+    def __init__(self, path=DEFAULT_RUS_CEFR):
+        self.path = Path(path)
 
     @property
-    def mapping(self) -> Mapping[str, str]:
+    def mapping(self):
         return _load_russian_cefr_mapping(self.path)
 
-    def lookup_level(self, token: str) -> str:
+    def lookup_level(self, token):
         token_norm = token.strip().lower()
         if not token_norm:
             return "Unknown"
@@ -32,7 +27,7 @@ class RussianCefrRepository:
 
 
 @lru_cache(maxsize=4)
-def _load_russian_cefr_mapping(path: Path) -> Mapping[str, str]:
+def _load_russian_cefr_mapping(path):
     if not path.exists():
         raise FileNotFoundError(f"Russian CEFR list not found at: {path}")
     csv = pd.read_csv(path)

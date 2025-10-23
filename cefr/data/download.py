@@ -1,21 +1,18 @@
-from __future__ import annotations
-
 import csv
 from pathlib import Path
-from typing import Union
 
 from datasets import load_dataset
 
 
-def ensure_dir(path: Union[str, Path]) -> None:
+def ensure_dir(path):
     Path(path).mkdir(parents=True, exist_ok=True)
 
 
 def save_kz_ru(
-    split: str = "train",
-    out_dir: Union[str, Path] = "data/parallel",
-    out_name: str = "kazparc_kz_ru.csv",
-) -> Path:
+    split="train",
+    out_dir="data/parallel",
+    out_name="kazparc_kz_ru.csv",
+):
     out_dir_path = Path(out_dir)
     ensure_dir(out_dir_path)
     ds = load_dataset("issai/kazparc", split=split)
@@ -39,7 +36,7 @@ def save_kz_ru(
 __all__ = ["save_kz_ru", "ensure_dir"]
 
 
-def main() -> None:
+def main():
     save_kz_ru()
 
 

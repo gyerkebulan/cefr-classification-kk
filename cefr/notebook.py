@@ -1,29 +1,23 @@
-from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Iterable, Sequence
-
 import pandas as pd
 
 from cefr.config import NotebookConfig
-from cefr.pipeline import EnsemblePipeline, EnsemblePrediction, TextPipeline
+from cefr.pipeline import EnsemblePipeline, TextPipeline
 from cefr.models import RuSentenceCefrModel
 
 
-AlignmentRow = tuple[int, int, str, str, str]
-
-
-@dataclass(slots=True)
 class NotebookPrediction:
-    rows: list[AlignmentRow]
-    cefr_level: str
-    translation: str
-    kazakh_distribution: dict[str, float]
-    russian_distribution: dict[str, float] | None
-    raw: object
+    __slots__ = ("rows", "cefr_level", "translation", "kazakh_distribution", "russian_distribution", "raw")
+
+    def __init__(self, rows, cefr_level, translation, kazakh_distribution, russian_distribution, raw):
+        self.rows = rows
+        self.cefr_level = cefr_level
+        self.translation = translation
+        self.kazakh_distribution = kazakh_distribution
+        self.russian_distribution = russian_distribution
+        self.raw = raw
 
 
-def _rows_from_alignments(alignment_tuples: Iterable[tuple[str, str, int, int, str]]) -> list[AlignmentRow]:
+def _rows_from_alignments(alignment_tuples):
     return [
         (kaz_idx, rus_idx, kaz_word, rus_word, cefr_level)
         for kaz_word, rus_word, kaz_idx, rus_idx, cefr_level in alignment_tuples
@@ -31,12 +25,12 @@ def _rows_from_alignments(alignment_tuples: Iterable[tuple[str, str, int, int, s
 
 
 def predict_notebook_view(
-    kazakh_text: str,
+    kazakh_text,
     *,
-    config: NotebookConfig | None = None,
-    russian_text: str | None = None,
-    russian_model: RuSentenceCefrModel | None = None,
-) -> NotebookPrediction:
+    config=None,
+    russian_text=None,
+    russian_model=None,
+):
     cfg = config or NotebookConfig()
     base_pipeline = TextPipeline(config=cfg.pipeline)
 
@@ -51,7 +45,7 @@ def predict_notebook_view(
             russian_model=russian_model,
             russian_weight=cfg.pipeline.russian_weight,
         )
-        prediction: EnsemblePrediction = ensemble.predict(
+        prediction = ensemble.predict(
             kazakh_text,
             russian_text=russian_text,
         )
@@ -77,7 +71,7 @@ def predict_notebook_view(
     )
 
 
-def rows_to_dataframe(rows: Sequence[AlignmentRow]) -> pd.DataFrame:
+def rows_to_dataframe(rows):
     return pd.DataFrame(
         rows,
         columns=[
@@ -90,4 +84,4 @@ def rows_to_dataframe(rows: Sequence[AlignmentRow]) -> pd.DataFrame:
     )
 
 
-__all__ = ["NotebookPrediction", "predict_notebook_view", "rows_to_dataframe", "AlignmentRow"]
+__all__ = ["NotebookPrediction", "predict_notebook_view", "rows_to_dataframe"]

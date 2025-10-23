@@ -1,39 +1,39 @@
-from __future__ import annotations
-
 from collections import defaultdict
 import re
-from dataclasses import dataclass
 from functools import lru_cache
-from typing import Iterable, Mapping, Sequence, Tuple
-
 import torch
 import pandas as pd
-from transformers import AutoModel, AutoTokenizer, PreTrainedModel, PreTrainedTokenizerBase
+from transformers import AutoModel, AutoTokenizer
 
 from .config import AlignmentConfig
+from .text_utils import is_cyrillic_token
 
 
 class SequenceTooLongError(RuntimeError):
     """Raised when tokenized sequences exceed the alignment model limits."""
 
 
-@dataclass(slots=True)
 class PhraseAlignment:
-    kazakh_phrase: str
-    russian_token: str
-    kazakh_span: tuple[int, ...]
-    russian_index: int
+    __slots__ = ("kazakh_phrase", "russian_token", "kazakh_span", "russian_index")
+
+    def __init__(self, kazakh_phrase, russian_token, kazakh_span, russian_index):
+        self.kazakh_phrase = kazakh_phrase
+        self.russian_token = russian_token
+        self.kazakh_span = kazakh_span
+        self.russian_index = russian_index
 
 
-@dataclass(slots=True)
 class WordAlignment:
-    kazakh_token: str
-    russian_token: str
-    kazakh_index: int
-    russian_index: int
-    cefr: str
+    __slots__ = ("kazakh_token", "russian_token", "kazakh_index", "russian_index", "cefr")
 
-    def as_tuple(self) -> tuple[str, str, int, int, str]:
+    def __init__(self, kazakh_token, russian_token, kazakh_index, russian_index, cefr):
+        self.kazakh_token = kazakh_token
+        self.russian_token = russian_token
+        self.kazakh_index = kazakh_index
+        self.russian_index = russian_index
+        self.cefr = cefr
+
+    def as_tuple(self):
         return (
             self.kazakh_token,
             self.russian_token,
@@ -43,21 +43,23 @@ class WordAlignment:
         )
 
 
-@dataclass(slots=True)
 class AlignmentResources:
-    tokenizer: PreTrainedTokenizerBase
-    model: PreTrainedModel
-    device: torch.device
+    __slots__ = ("tokenizer", "model", "device")
+
+    def __init__(self, tokenizer, model, device):
+        self.tokenizer = tokenizer
+        self.model = model
+        self.device = device
 
 
-def _resolve_device(device: str | torch.device | None) -> torch.device:
+def _resolve_device(device):
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
     return torch.device(device)
 
 
 @lru_cache(maxsize=4)
-def _load_resources(model_name: str, device_hint: str | None) -> AlignmentResources:
+def _load_resources(model_name, device_hint):
     device = _resolve_device(device_hint)
     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
     model = AutoModel.from_pretrained(model_name)
@@ -69,7 +71,7 @@ def _load_resources(model_name: str, device_hint: str | None) -> AlignmentResour
 class EmbeddingAligner:
     """Mutual alignment over contextual embeddings."""
 
-    def __init__(self, config: AlignmentConfig | None = None) -> None:
+    def __init__(self, config=None):
         self.config = config or AlignmentConfig()
         resources = _load_resources(self.config.model_name, self.config.device)
         self.tokenizer = resources.tokenizer
@@ -82,12 +84,12 @@ class EmbeddingAligner:
 
     def align(
         self,
-        kz_words: Sequence[str],
-        ru_words: Sequence[str],
+        kz_words,
+        ru_words,
         *,
-        layer: int | None = None,
-        threshold: float | None = None,
-    ) -> set[tuple[int, int]]:
+        layer=None,
+        threshold=None,
+    ):
         layer = layer if layer is not None else self.config.layer
         threshold = threshold if threshold is not None else self.config.threshold
         kz_enc, kz_ids, kz_truncated = self._tokenize_words(kz_words)
@@ -104,7 +106,7 @@ class EmbeddingAligner:
         sim = kz_rep @ ru_rep.T
         p_rgk = torch.softmax(sim, dim=-1)
         p_kgr = torch.softmax(sim, dim=-2)
-        links: set[tuple[int, int]] = set()
+        links = set()
         for i, kz_idx in enumerate(kz_keep):
             for j, ru_idx in enumerate(ru_keep):
                 if p_rgk[i, j] > threshold and p_kgr[i, j] > threshold:
@@ -113,12 +115,12 @@ class EmbeddingAligner:
 
     def diagnostics(
         self,
-        kz_words: Sequence[str],
-        ru_words: Sequence[str],
+        kz_words,
+        ru_words,
         *,
-        layer: int | None = None,
-        threshold: float | None = None,
-    ) -> "AlignmentDiagnostics":
+        layer=None,
+        threshold=None,
+    ):
         layer = layer if layer is not None else self.config.layer
         threshold = threshold if threshold is not None else self.config.threshold
         kz_enc, kz_ids, kz_truncated = self._tokenize_words(kz_words)
@@ -143,7 +145,7 @@ class EmbeddingAligner:
         }
         return AlignmentDiagnostics(links, list(kz_keep), list(ru_keep), p_rgk, p_kgr)
 
-    def _tokenize_words(self, words: Sequence[str]):
+    def _tokenize_words(self, words):
         enc = self.tokenizer(
             list(words),
             is_split_into_words=True,
@@ -161,14 +163,14 @@ class EmbeddingAligner:
                 enc[key] = value.to(self.device)
         return enc, word_ids, truncated
 
-    def _hidden_state(self, enc, layer: int):
+    def _hidden_state(self, enc, layer):
         with torch.no_grad():
             out = self.model(**enc, output_hidden_states=True)
         return out.hidden_states[layer].squeeze(0)
 
     @staticmethod
-    def _pool_words(hs, word_ids: Iterable[int | None]):
-        buckets: dict[int, list[torch.Tensor]] = defaultdict(list)
+    def _pool_words(hs, word_ids):
+        buckets = defaultdict(list)
         for i, wid in enumerate(word_ids):
             if wid is None:
                 continue
@@ -180,17 +182,19 @@ class EmbeddingAligner:
         return reps, keep
 
 
-@dataclass(slots=True)
 class AlignmentDiagnostics:
-    links: set[tuple[int, int]]
-    kz_keep: list[int]
-    ru_keep: list[int]
-    p_ru_given_kz: torch.Tensor
-    p_kz_given_ru: torch.Tensor
+    __slots__ = ("links", "kz_keep", "ru_keep", "p_ru_given_kz", "p_kz_given_ru")
+
+    def __init__(self, links, kz_keep, ru_keep, p_ru_given_kz, p_kz_given_ru):
+        self.links = links
+        self.kz_keep = kz_keep
+        self.ru_keep = ru_keep
+        self.p_ru_given_kz = p_ru_given_kz
+        self.p_kz_given_ru = p_kz_given_ru
 
     def iter_rows(
-        self, kz_words: Sequence[str], ru_words: Sequence[str]
-    ) -> Iterable[Mapping[str, object]]:
+        self, kz_words, ru_words
+    ):
         for i, kz_idx in enumerate(self.kz_keep):
             kz_token = kz_words[kz_idx]
             for j, ru_idx in enumerate(self.ru_keep):
@@ -208,7 +212,7 @@ class AlignmentDiagnostics:
                     "is_link": (kz_idx, ru_idx) in self.links,
                 }
 
-    def to_dataframe(self, kz_words: Sequence[str], ru_words: Sequence[str]) -> pd.DataFrame:
+    def to_dataframe(self, kz_words, ru_words):
         rows = list(self.iter_rows(kz_words, ru_words))
         if not rows:
             return pd.DataFrame(
@@ -225,7 +229,7 @@ class AlignmentDiagnostics:
             )
         return pd.DataFrame(rows)
 
-    def link_probability(self, kz_idx: int, ru_idx: int) -> float:
+    def link_probability(self, kz_idx, ru_idx):
         kz_lookup = {idx: i for i, idx in enumerate(self.kz_keep)}
         ru_lookup = {idx: j for j, idx in enumerate(self.ru_keep)}
         i = kz_lookup[kz_idx]
@@ -234,15 +238,15 @@ class AlignmentDiagnostics:
 
 
 def merge_kz_to_single_ru(
-    kazakh_words: Sequence[str],
-    russian_words: Sequence[str],
-    links: set[tuple[int, int]],
-) -> list[PhraseAlignment]:
-    alignment_index: dict[int, list[int]] = defaultdict(list)
+    kazakh_words,
+    russian_words,
+    links,
+):
+    alignment_index = defaultdict(list)
     for kaz_idx, ru_idx in links:
         alignment_index[ru_idx].append(kaz_idx)
 
-    merged_spans: list[tuple[tuple[int, ...], int]] = []
+    merged_spans = []
     for ru_idx in sorted(alignment_index):
         kazakh_indices = sorted(alignment_index[ru_idx])
         span = [kazakh_indices[0]]
@@ -254,7 +258,7 @@ def merge_kz_to_single_ru(
                 span = [idx]
         merged_spans.append((tuple(span), ru_idx))
 
-    result: list[PhraseAlignment] = []
+    result = []
     for kazakh_span, ru_idx in merged_spans:
         kazakh_phrase = " ".join(kazakh_words[i] for i in kazakh_span)
         russian_token = russian_words[ru_idx]
@@ -269,21 +273,23 @@ def merge_kz_to_single_ru(
     return result
 
 
-NON_WORD_RE = re.compile(r"^(?:\W+|\d[\d\W]*)$") # TODO: Подкорректировать regex для чисто русских/казахских слов
+NON_WORD_RE = re.compile(r"^(?:\W+|\d[\d\W]*)$")
 
 
-def is_informative(token: str) -> bool:
+def is_informative(token):
     token = token.strip().lower()
-    return bool(token) and not NON_WORD_RE.fullmatch(token)
+    if not token or NON_WORD_RE.fullmatch(token):
+        return False
+    return is_cyrillic_token(token)
 
 
 def informative_link_share(
-    details: AlignmentDiagnostics,
-    kz_words: Sequence[str],
-    ru_words: Sequence[str],
+    details,
+    kz_words,
+    ru_words,
     *,
-    gold_links: set[tuple[int, int]] | None = None,
-) -> float:
+    gold_links=None,
+):
     if not details.links:
         return 0.0
 
@@ -297,15 +303,15 @@ def informative_link_share(
 
 
 def fraction_above_threshold(
-    samples: Sequence[Mapping[str, str]],
-    aligner: EmbeddingAligner,
+    samples,
+    aligner,
     *,
-    layer: int = 8,
-    thresh: float = 0.05,
-    prob_threshold: float = 0.2,
-    kaz_key: str = "kaz_sent",
-    rus_key: str = "rus_sent",
-) -> float:
+    layer=8,
+    thresh=0.05,
+    prob_threshold=0.2,
+    kaz_key="kaz_sent",
+    rus_key="rus_sent",
+):
     total_links = 0
     passed = 0
     for item in samples:

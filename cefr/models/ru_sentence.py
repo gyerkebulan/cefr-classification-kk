@@ -1,8 +1,4 @@
-from __future__ import annotations
-
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
 
 import torch
 from torch.utils.data import Dataset
@@ -19,21 +15,21 @@ from cefr.data import CEFR_LEVELS
 class RuSentenceDataset(Dataset):
     def __init__(
         self,
-        sentences: Sequence[str],
-        targets: Sequence[Sequence[float]],
-        tokenizer: PreTrainedTokenizerBase,
+        sentences,
+        targets,
+        tokenizer,
         *,
-        max_length: int = 256,
-    ) -> None:
+        max_length=256,
+    ):
         self.sentences = sentences
         self.targets = targets
         self.tokenizer = tokenizer
         self.max_length = max_length
 
-    def __len__(self) -> int:
+    def __len__(self):
         return len(self.sentences)
 
-    def __getitem__(self, idx: int):
+    def __getitem__(self, idx):
         text = self.sentences[idx]
         encoded = self.tokenizer(
             text,
@@ -48,14 +44,16 @@ class RuSentenceDataset(Dataset):
         return inputs
 
 
-@dataclass(slots=True)
 class RuSentenceCefrModel:
-    tokenizer: PreTrainedTokenizerBase
-    model: PreTrainedModel
-    levels: tuple[str, ...] = CEFR_LEVELS
+    __slots__ = ("tokenizer", "model", "levels")
+
+    def __init__(self, tokenizer, model, levels=CEFR_LEVELS):
+        self.tokenizer = tokenizer
+        self.model = model
+        self.levels = levels
 
     @classmethod
-    def from_pretrained(cls, checkpoint: str | Path, *, device: str | torch.device | None = None):
+    def from_pretrained(cls, checkpoint, *, device=None):
         tokenizer = AutoTokenizer.from_pretrained(checkpoint, use_fast=True)
         model = AutoModelForSequenceClassification.from_pretrained(
             checkpoint,
@@ -69,7 +67,7 @@ class RuSentenceCefrModel:
         return cls(tokenizer=tokenizer, model=model)
 
     @torch.inference_mode()
-    def predict_proba(self, sentence: str) -> dict[str, float]:
+    def predict_proba(self, sentence):
         encoded = self.tokenizer(
             sentence,
             truncation=True,
@@ -82,7 +80,7 @@ class RuSentenceCefrModel:
         return {level: float(prob) for level, prob in zip(self.levels, probs)}
 
     @torch.inference_mode()
-    def predict(self, sentence: str) -> tuple[str, float, dict[str, float]]:
+    def predict(self, sentence):
         probs = self.predict_proba(sentence)
         level, confidence = max(probs.items(), key=lambda item: item[1])
         return level, confidence, probs

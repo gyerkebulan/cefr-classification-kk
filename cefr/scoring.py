@@ -1,31 +1,26 @@
-from __future__ import annotations
-
 from collections import Counter
-from dataclasses import dataclass, field
-from typing import Mapping, Sequence
 
-from .alignment import PhraseAlignment
 from .data import CEFR_LEVELS, RussianCefrRepository
+from .text_utils import is_cyrillic_token
 
 
-@dataclass(slots=True)
 class CefrScorer:
-    repository: RussianCefrRepository
-    cefr_order: Sequence[str] = CEFR_LEVELS
-    _weights: Mapping[str, int] = field(init=False, repr=False)
+    __slots__ = ("repository", "cefr_order", "_weights")
 
-    def __post_init__(self) -> None:
-        self.cefr_order = tuple(self.cefr_order)
-        self._weights = {
-            level: idx for idx, level in enumerate(self.cefr_order)
-        }
+    def __init__(self, repository, cefr_order=CEFR_LEVELS):
+        self.repository = repository
+        self.cefr_order = tuple(cefr_order)
+        self._weights = {level: idx for idx, level in enumerate(self.cefr_order)}
 
-    def infer_level(self, russian_token: str) -> str:
+    def infer_level(self, russian_token):
         return self.repository.lookup_level(russian_token)
 
-    def score(self, alignments: Sequence[PhraseAlignment]) -> tuple[dict[str, float], str]:
-        counts: Counter[str] = Counter()
+    def score(self, alignments):
+        counts = Counter()
         for alignment in alignments:
+            token = alignment.russian_token
+            if not is_cyrillic_token(token):
+                continue
             level = self.infer_level(alignment.russian_token)
             counts[level] += 1
 

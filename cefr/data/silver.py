@@ -1,7 +1,4 @@
-from __future__ import annotations
-
 from pathlib import Path
-from typing import Iterable
 
 import pandas as pd
 
@@ -11,32 +8,28 @@ except ImportError:  # pragma: no cover
     import pymorphy2 as pymorphy
 
 from cefr.alignment import EmbeddingAligner, is_informative, merge_kz_to_single_ru
-from cefr.config import AlignmentConfig
 from cefr.data import RussianCefrRepository
+from cefr.text_utils import tokenize_words, is_cyrillic_token
 
 
-def _lemmatizer() -> pymorphy.MorphAnalyzer:
+def _lemmatizer():
     return pymorphy.MorphAnalyzer()
 
 
-def _lemmatize(token: str, analyzer: pymorphy.MorphAnalyzer) -> str:
+def _lemmatize(token, analyzer):
     parsed = analyzer.parse(token)[0]
     return parsed.normal_form
 
 
-def _tokenize(text: str) -> tuple[str, ...]:
-    return tuple(part for part in text.split() if part)
-
-
 def build_silver_labels(
-    parallel_csv: str | Path,
+    parallel_csv,
     *,
-    rus_cefr: str | Path,
-    out_csv: str | Path,
-    aligner: EmbeddingAligner | None = None,
-    alignment_config: AlignmentConfig | None = None,
-    skip_non_informative: bool = True,
-) -> Path:
+    rus_cefr,
+    out_csv,
+    aligner=None,
+    alignment_config=None,
+    skip_non_informative=True,
+):
     parallel_csv = Path(parallel_csv)
     rus_cefr = Path(rus_cefr)
     out_csv = Path(out_csv)
@@ -50,14 +43,14 @@ def build_silver_labels(
         aligner = EmbeddingAligner(alignment_config)
     analyzer = _lemmatizer()
 
-    rows: list[dict[str, str]] = []
+    rows = []
     skipped_sequences = 0
 
     for sample in df.itertuples(index=False):
         kazakh = str(getattr(sample, "kaz", "")).strip()
         russian = str(getattr(sample, "rus", "")).strip()
-        kz_words = _tokenize(kazakh)
-        ru_words = _tokenize(russian)
+        kz_words = tokenize_words(kazakh)
+        ru_words = tokenize_words(russian)
         try:
             links = aligner.align(kz_words, ru_words)
         except Exception:
@@ -70,6 +63,8 @@ def build_silver_labels(
 
         for phrase in phrases:
             token = phrase.russian_token.strip().lower()
+            if not is_cyrillic_token(token):
+                continue
             if skip_non_informative and not is_informative(token):
                 continue
             lemma = _lemmatize(token, analyzer)
@@ -94,7 +89,7 @@ def build_silver_labels(
 __all__ = ["build_silver_labels"]
 
 
-def main() -> None:
+def main():
     build_silver_labels(
         parallel_csv=Path("data/parallel/kazparc_kz_ru.csv"),
         rus_cefr=Path("data/cefr/russian_cefr_sample.csv"),

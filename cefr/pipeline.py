@@ -1,40 +1,34 @@
-from __future__ import annotations
-
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Mapping, Sequence
 
 from cefr.alignment import (
     EmbeddingAligner,
-    PhraseAlignment,
     WordAlignment,
     merge_kz_to_single_ru,
 )
-from cefr.config import AlignmentConfig, PipelineConfig, TranslatorConfig
+from cefr.config import PipelineConfig
 from cefr.data import RussianCefrRepository
 from cefr.models import RuSentenceCefrModel
 from cefr.scoring import CefrScorer
-from cefr.translation import Translator, get_translator
+from cefr.translation import get_translator
+from cefr.text_utils import tokenize_words
 
 
-def _tokenize(text: str) -> tuple[str, ...]:
-    return tuple(part for part in text.strip().split() if part)
-
-
-@dataclass(slots=True)
 class TextPrediction:
-    translation: str
-    distribution: Mapping[str, float]
-    average_level: str
-    phrase_alignments: Sequence[PhraseAlignment]
-    word_alignments: Sequence[WordAlignment]
+    __slots__ = ("translation", "distribution", "average_level", "phrase_alignments", "word_alignments")
 
-    def iter_word_alignment_tuples(self) -> Iterable[tuple[str, str, int, int, str]]:
+    def __init__(self, translation, distribution, average_level, phrase_alignments, word_alignments):
+        self.translation = translation
+        self.distribution = distribution
+        self.average_level = average_level
+        self.phrase_alignments = phrase_alignments
+        self.word_alignments = word_alignments
+
+    def iter_word_alignment_tuples(self):
         for alignment in self.word_alignments:
             yield alignment.as_tuple()
 
     @property
-    def word_alignment_tuples(self) -> list[tuple[str, str, int, int, str]]:
+    def word_alignment_tuples(self):
         return list(self.iter_word_alignment_tuples())
 
 
@@ -44,12 +38,12 @@ class TextPipeline:
     def __init__(
         self,
         *,
-        config: PipelineConfig | None = None,
-        translator: Translator | None = None,
-        aligner: EmbeddingAligner | None = None,
-        scorer: CefrScorer | None = None,
-        repository: RussianCefrRepository | None = None,
-    ) -> None:
+        config=None,
+        translator=None,
+        aligner=None,
+        scorer=None,
+        repository=None,
+    ):
         self.config = config or PipelineConfig()
         self.translator = translator or get_translator(self.config.translator)
         aligner_config = self.config.alignment
@@ -58,10 +52,10 @@ class TextPipeline:
         self.repository = repository or RussianCefrRepository(Path(repo_path))
         self.scorer = scorer or CefrScorer(self.repository)
 
-    def predict(self, kazakh_text: str, *, russian_text: str | None = None) -> TextPrediction:
+    def predict(self, kazakh_text, *, russian_text=None):
         translation = russian_text or self.translator.translate(kazakh_text)
-        kazakh_words = _tokenize(kazakh_text)
-        russian_words = _tokenize(translation)
+        kazakh_words = tokenize_words(kazakh_text)
+        russian_words = tokenize_words(translation)
         links = self.aligner.align(kazakh_words, russian_words)
         phrases = merge_kz_to_single_ru(kazakh_words, russian_words, links)
         distribution, avg_level = self.scorer.score(phrases)
@@ -75,9 +69,9 @@ class TextPipeline:
         )
 
     def _build_word_alignments(
-        self, phrases: Sequence[PhraseAlignment], kazakh_words: Sequence[str]
-    ) -> list[WordAlignment]:
-        word_alignments: list[WordAlignment] = []
+        self, phrases, kazakh_words
+    ):
+        word_alignments = []
         for phrase in phrases:
             level = self.scorer.infer_level(phrase.russian_token)
             for kaz_idx in phrase.kazakh_span:
@@ -94,26 +88,47 @@ class TextPipeline:
         return word_alignments
 
 
-@dataclass(slots=True)
 class EnsemblePrediction:
-    level: str
-    confidence: float
-    probabilities: Mapping[str, float]
-    translation: str
-    kazakh_distribution: Mapping[str, float]
-    russian_distribution: Mapping[str, float]
-    word_alignments: Sequence[tuple[str, str, int, int, str]]
-    base_prediction: TextPrediction
+    __slots__ = (
+        "level",
+        "confidence",
+        "probabilities",
+        "translation",
+        "kazakh_distribution",
+        "russian_distribution",
+        "word_alignments",
+        "base_prediction",
+    )
+
+    def __init__(
+        self,
+        level,
+        confidence,
+        probabilities,
+        translation,
+        kazakh_distribution,
+        russian_distribution,
+        word_alignments,
+        base_prediction,
+    ):
+        self.level = level
+        self.confidence = confidence
+        self.probabilities = probabilities
+        self.translation = translation
+        self.kazakh_distribution = kazakh_distribution
+        self.russian_distribution = russian_distribution
+        self.word_alignments = word_alignments
+        self.base_prediction = base_prediction
 
 
 class EnsemblePipeline:
     def __init__(
         self,
         *,
-        base_pipeline: TextPipeline,
-        russian_model: RuSentenceCefrModel,
-        russian_weight: float = 0.6,
-    ) -> None:
+        base_pipeline,
+        russian_model,
+        russian_weight=0.6,
+    ):
         if not 0.0 <= russian_weight <= 1.0:
             raise ValueError("russian_weight must be between 0 and 1 inclusive.")
         self.base = base_pipeline
@@ -121,8 +136,8 @@ class EnsemblePipeline:
         self.weight = russian_weight
 
     def _weighted_average(
-        self, ru_probs: Mapping[str, float], kk_probs: Mapping[str, float]
-    ) -> dict[str, float]:
+        self, ru_probs, kk_probs
+    ):
         combined = {}
         for level in self.base.scorer.cefr_order:
             combined[level] = (
@@ -135,7 +150,7 @@ class EnsemblePipeline:
             return {level: uniform for level in combined}
         return {level: value / total for level, value in combined.items()}
 
-    def predict(self, kazakh_text: str, *, russian_text: str | None = None) -> EnsemblePrediction:
+    def predict(self, kazakh_text, *, russian_text=None):
         base_prediction = self.base.predict(kazakh_text, russian_text=russian_text)
         translation = base_prediction.translation
         ru_probs = self.russian_model.predict_proba(translation)

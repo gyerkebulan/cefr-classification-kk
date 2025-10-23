@@ -1,10 +1,6 @@
-from __future__ import annotations
-
 import json
-from dataclasses import dataclass
+import argparse
 from pathlib import Path
-from typing import Sequence
-
 import pandas as pd
 from joblib import dump
 from sklearn.compose import ColumnTransformer
@@ -17,8 +13,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 
-TEXT_COLUMNS: tuple[str, str] = ("kaz", "rus")
-NUMERIC_COLUMNS: tuple[str, ...] = (
+TEXT_COLUMNS = ("kaz", "rus")
+NUMERIC_COLUMNS = (
     "difficulty_score",
     "avg_sent_len_mean",
     "avg_word_len_mean",
@@ -31,21 +27,27 @@ TARGET_COLUMN = "predicted_cefr"
 SECONDARY_TARGET_COLUMN = "predicted_cefr_int"
 
 
-@dataclass(slots=True)
 class TabularTrainingConfig:
-    train_path: Path
-    output_dir: Path
-    test_size: float = 0.2
-    random_state: int = 42
-    max_features: int = 3000
-    ngram_max: int = 2
+    __slots__ = ("train_path", "output_dir", "test_size", "random_state", "max_features", "ngram_max")
 
-    def __post_init__(self) -> None:
-        self.train_path = Path(self.train_path)
-        self.output_dir = Path(self.output_dir)
+    def __init__(
+        self,
+        train_path,
+        output_dir,
+        test_size=0.2,
+        random_state=42,
+        max_features=3000,
+        ngram_max=2,
+    ):
+        self.train_path = Path(train_path)
+        self.output_dir = Path(output_dir)
+        self.test_size = test_size
+        self.random_state = random_state
+        self.max_features = max_features
+        self.ngram_max = ngram_max
 
 
-def _build_preprocessor(config: TabularTrainingConfig) -> ColumnTransformer:
+def _build_preprocessor(config):
     text_features = [
         (
             f"tfidf_{column}",
@@ -74,7 +76,7 @@ def _build_preprocessor(config: TabularTrainingConfig) -> ColumnTransformer:
     )
 
 
-def _build_model(config: TabularTrainingConfig) -> Pipeline:
+def _build_model(config):
     preprocessor = _build_preprocessor(config)
     classifier = LogisticRegression(
         solver="saga",
@@ -89,7 +91,7 @@ def _build_model(config: TabularTrainingConfig) -> Pipeline:
     )
 
 
-def _load_dataset(path: Path) -> pd.DataFrame:
+def _load_dataset(path):
     df = pd.read_csv(path)
     missing = [col for col in (*TEXT_COLUMNS, TARGET_COLUMN) if col not in df.columns]
     if missing:
@@ -102,7 +104,7 @@ def _load_dataset(path: Path) -> pd.DataFrame:
     return df
 
 
-def train_tabular_model(config: TabularTrainingConfig) -> dict[str, object]:
+def train_tabular_model(config):
     df = _load_dataset(config.train_path)
     X = df.drop(columns=[TARGET_COLUMN])
     y = df[TARGET_COLUMN].astype(str)
@@ -158,5 +160,57 @@ def train_tabular_model(config: TabularTrainingConfig) -> dict[str, object]:
         "accuracy": accuracy,
     }
 
+def parse_args(args=None):
+    parser = argparse.ArgumentParser(
+        description="Train a CEFR classifier on the KazParC dataset with engineered features."
+    )
+    parser.add_argument(
+        "--train-path",
+        type=Path,
+        default=Path("data/text/kazparc_kz_ru_cefr_estimated.csv"),
+        help="Path to the CSV file with Kazakh/Russian pairs and features.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("models/kazparc_tabular_cefr"),
+        help="Where to save the fitted pipeline and metrics.",
+    )
+    parser.add_argument("--test-size", type=float, default=0.2, help="Validation split size.")
+    parser.add_argument("--random-state", type=int, default=42, help="Random seed for splitting.")
+    parser.add_argument(
+        "--max-features",
+        type=int,
+        default=3000,
+        help="Maximum number of TF-IDF features per language.",
+    )
+    parser.add_argument(
+        "--ngram-max",
+        type=int,
+        default=2,
+        help="Maximum n-gram length for the TF-IDF extractor.",
+    )
+    parsed = parser.parse_args(args=args)
+    return TabularTrainingConfig(
+        train_path=parsed.train_path,
+        output_dir=parsed.output_dir,
+        test_size=parsed.test_size,
+        random_state=parsed.random_state,
+        max_features=parsed.max_features,
+        ngram_max=parsed.ngram_max,
+    )
 
-__all__ = ["TabularTrainingConfig", "train_tabular_model"]
+
+def main(args=None):
+    config = parse_args(args=args)
+    result = train_tabular_model(config)
+    print(f"Saved model to {result['model_path']}")
+    print(f"Validation accuracy: {result['accuracy']:.3f}")
+    print(f"Metrics report written to {result['metrics_path']}")
+
+
+__all__ = ["TabularTrainingConfig", "train_tabular_model", "parse_args", "main"]
+
+
+if __name__ == "__main__":
+    main()

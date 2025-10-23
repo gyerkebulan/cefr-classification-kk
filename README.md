@@ -194,9 +194,6 @@ Ensure translation models and CEFR resources referenced in `config/default.yaml`
 ## Repository Layout
 
 ```
-alignment.py                  # CLI: token alignment
-word_cefr.py                  # CLI: word-level CEFR scoring
-text_cefr.py                  # CLI: text-level CEFR scoring
 cefr/
   alignment.py                # alignment utilities
   cli.py                      # shared CLI entry points (align, word, text)

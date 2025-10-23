@@ -7,7 +7,7 @@ from cefr.text_utils import tokenize_words
 __all__ = ["TextFeatures", "compute_text_features", "extract_numbers", "split_sentences"]
 NUMBER_PATTERN = re.compile(r"\d+(?:[.,]\d+)*", re.UNICODE)
 SENTENCE_PATTERN = re.compile(r"[^.!?]+(?:[.!?]+|$)", re.MULTILINE)
-VOWELS = "aeiouyаеёиоуыэюя"
+VOWELS = "аеёиоуыэюя"
 
 
 @dataclass(slots=True)

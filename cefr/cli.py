@@ -7,6 +7,11 @@ import sys
 from pathlib import Path
 
 from cefr import load_config
+from cefr.alignment import merge_kz_to_single_ru
+from cefr.models.word_transformer import (
+    DEFAULT_MODEL_DIR as DEFAULT_WORD_MODEL_DIR,
+    predict_word_batch,
+)
 from cefr.pipeline import TextPipeline
 from cefr.text_utils import tokenize_words
 from cefr.data.silver import build_silver_labels
@@ -38,6 +43,12 @@ def _build_parser() -> argparse.ArgumentParser:
     align.add_argument(
         "--rus-text",
         help="Optional Russian translation. If omitted, the translator is used.",
+    )
+    align.add_argument(
+        "--min-confidence",
+        type=float,
+        default=0.8,
+        help="Minimum confidence when highlighting multi-token Kazakh spans (default: 0.8).",
     )
     align.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
 
@@ -134,7 +145,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     silver.add_argument(
         "--size",
-        default=10000
+        type=int,
+        default=10000,
+        help="Optional cap on parallel sentence pairs to process when generating silver labels.",
     )
     silver.add_argument(
         "--parallel-path",
@@ -202,26 +215,51 @@ def _run_align(pipeline: TextPipeline, args: argparse.Namespace) -> dict:
         threshold=pipeline.config.alignment.threshold,
     )
 
-    alignments: list[dict[str, object]] = []
-    for row in diagnostics.iter_rows(kaz_tokens, rus_tokens):
-        if not row.get("is_link"):
+    two_to_one: list[dict[str, object]] = []
+    merged_spans = merge_kz_to_single_ru(kaz_tokens, rus_tokens, diagnostics.links)
+    
+    # Collect all russian tokens for batch prediction
+    russian_tokens_for_pred = []
+    phrase_data = []
+    
+    for phrase in merged_spans:
+        if len(phrase.kazakh_span) != 2:
             continue
-        alignments.append(
-            {
-                "kaz_index": row["kaz_index"],
-                "kaz_token": row["kaz_token"],
-                "rus_index": row["rus_index"],
-                "rus_token": row["rus_token"],
-                "probability": row["joint_prob"],
-            }
+        try:
+            confidences = [
+                diagnostics.link_probability(k_idx, phrase.russian_index)
+                for k_idx in phrase.kazakh_span
+            ]
+        except KeyError:
+            continue
+        confidence = min(confidences)
+        if confidence < args.min_confidence:
+            continue
+        
+        russian_tokens_for_pred.append(phrase.russian_token)
+        phrase_data.append({
+            "kazakh_phrase": phrase.kazakh_phrase,
+            "russian_token": phrase.russian_token,
+            "kazakh_span": list(phrase.kazakh_span),
+            "russian_index": phrase.russian_index,
+            "alignment_conf": confidence,
+        })
+    
+    # Predict CEFR levels for all russian tokens in batch
+    if russian_tokens_for_pred:
+        cefr_distributions = predict_word_batch(
+            russian_tokens_for_pred,
+            model_dir=DEFAULT_WORD_MODEL_DIR,
+            return_probabilities=True,
         )
+        for phrase_info, cefr_dist in zip(phrase_data, cefr_distributions):
+            cefr_level = max(cefr_dist.items(), key=lambda x: x[1])[0]
+            phrase_info["russian_cefr_level"] = cefr_level
+            phrase_info["russian_cefr_confidence"] = cefr_dist[cefr_level]
+    
+    two_to_one = phrase_data
 
-    return {
-        "kaz_text": args.kaz_text,
-        "rus_text": prediction.translation,
-        "translation_used": args.rus_text is None,
-        "alignments": alignments,
-    }
+    return two_to_one
 
 
 def _run_word(pipeline: TextPipeline, args: argparse.Namespace) -> dict:
@@ -330,7 +368,7 @@ def _run_generate_silver(args: argparse.Namespace) -> dict:
         out_csv=output_path,
         aligner=pipeline.aligner,
         alignment_config=cfg.pipeline.alignment,
-        size = args.size,
+        size=args.size,
     )
     return {
         "output_path": str(output_path),

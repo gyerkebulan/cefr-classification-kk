@@ -13,19 +13,25 @@ Each action is exposed as a one‑liner script and can also be invoked from Pyth
 ## Quick CLI Reference
 
 ```bash
-# 1) Token alignment
+# 1) High-confidence Kazakh bigrams aligned to a single Russian token
 python -m cefr.cli align --kaz-text "Ол кітап оқып жатыр" --rus-text "Он читает книгу"
+# Outputs rows with: kazakh_phrase, russian_token, kazakh_span, russian_index, alignment_conf (confidence ≥ 0.8 by default)
 
 # 2) Kazakh word CEFR classification
 python -m cefr.cli word --kaz-word "кітап"
+# (kaz_word, cefr_level, confidence)
 
 # 3) Kazakh text CEFR classification
-python -m cefr.cli text --kaz-text "Ол кітап оқып жатыр. Бүгін мектепте жаңа тақырып өткен."
+python -m cefr.cli text --kaz-text "Ол кітап оқып жатыр. Бүгін мектепте жаңа тақырып өткен." # TODO: --rus-text 
+# (kaz_text, cefr_level, confidence)
 
-# 4) Train word-level CEFR classifier (Russian lexicon)
-python -m cefr.cli train-word --dataset-path data/cefr/russian_cefr_sample.csv --output-dir models/russian_word_cefr
+# 4) Generate silver word labels (optional)
+python -m cefr.cli silver --parallel-path data/parallel/kazparc_kz_ru.csv --output-path data/labels/silver_word_labels.csv
 
-# 5) Train text-level CEFR classifier (bilingual model)
+# 5) Train word-level CEFR classifier (silver labels)
+python -m cefr.cli train-word --dataset-path data/labels/silver_word_labels.csv --output-dir models/transformer_word_cefr --rebuild
+
+# 6) Train text-level CEFR classifier (bilingual model)
 python -m cefr.cli train-text
 ```
 
@@ -37,6 +43,20 @@ The training commands rely on Hugging Face models/datasets. Ensure you have a va
 
 ```bash
 pip install transformers datasets
+```
+
+The word-level trainer consumes the silver labels in `data/labels/silver_word_labels.csv`. Regenerate them with `python -m cefr.cli silver --rebuild` after extending the parallel corpus or Russian CEFR lexicon, then rerun `train-word` to refresh the transformer model.
+
+### Word-level transformer inference
+
+```python
+from pathlib import Path
+from cefr.models.word_transformer import predict_word_level, predict_word_distribution
+
+model_dir = Path("models/transformer_word_cefr")
+
+print(predict_word_level("пример", model_dir=model_dir))
+print(predict_word_distribution("пример", model_dir=model_dir))
 ```
 
 ## License

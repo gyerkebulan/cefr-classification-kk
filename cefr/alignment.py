@@ -1,6 +1,7 @@
 from collections import defaultdict
 import re
 from functools import lru_cache
+
 import torch
 import pandas as pd
 from transformers import AutoModel, AutoTokenizer
@@ -226,7 +227,7 @@ class AlignmentDiagnostics:
                     "joint_prob",
                     "is_link",
                 ]
-            )
+        )
         return pd.DataFrame(rows)
 
     def link_probability(self, kz_idx, ru_idx):

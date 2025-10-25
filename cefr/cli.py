@@ -218,9 +218,11 @@ def _run_align(pipeline: TextPipeline, args: argparse.Namespace) -> dict:
     two_to_one: list[dict[str, object]] = []
     merged_spans = merge_kz_to_single_ru(kaz_tokens, rus_tokens, diagnostics.links)
     
-    # Collect all russian tokens for batch prediction
-    russian_tokens_for_pred = []
-    phrase_data = []
+    model_dir = Path(pipeline.config.word_model_dir or DEFAULT_WORD_MODEL_DIR)
+    device = pipeline.config.word_model_device
+
+    russian_tokens_for_pred: list[str] = []
+    phrase_data: list[dict[str, object]] = []
     
     for phrase in merged_spans:
         if len(phrase.kazakh_span) != 2:
@@ -237,26 +239,44 @@ def _run_align(pipeline: TextPipeline, args: argparse.Namespace) -> dict:
             continue
         
         russian_tokens_for_pred.append(phrase.russian_token)
-        phrase_data.append({
-            "kazakh_phrase": phrase.kazakh_phrase,
-            "russian_token": phrase.russian_token,
-            "kazakh_span": list(phrase.kazakh_span),
-            "russian_index": phrase.russian_index,
-            "alignment_conf": confidence,
-        })
-    
-    # Predict CEFR levels for all russian tokens in batch
-    if russian_tokens_for_pred:
-        cefr_distributions = predict_word_batch(
-            russian_tokens_for_pred,
-            model_dir=DEFAULT_WORD_MODEL_DIR,
-            return_probabilities=True,
+        phrase_data.append(
+            {
+                "kazakh_phrase": phrase.kazakh_phrase,
+                "russian_token": phrase.russian_token,
+                "kazakh_span": list(phrase.kazakh_span),
+                "russian_index": phrase.russian_index,
+                "alignment_conf": confidence,
+            }
         )
-        for phrase_info, cefr_dist in zip(phrase_data, cefr_distributions):
-            cefr_level = max(cefr_dist.items(), key=lambda x: x[1])[0]
-            phrase_info["russian_cefr_level"] = cefr_level
-            phrase_info["russian_cefr_confidence"] = cefr_dist[cefr_level]
-    
+
+    if russian_tokens_for_pred and model_dir.exists():
+        try:
+            cefr_distributions = predict_word_batch(
+                russian_tokens_for_pred,
+                model_dir=model_dir,
+                device=device,
+                return_probabilities=True,
+            )
+        except FileNotFoundError:
+            cefr_distributions = []
+        if cefr_distributions:
+            for phrase_info, cefr_dist in zip(phrase_data, cefr_distributions):
+                if not cefr_dist:
+                    phrase_info["russian_cefr_level"] = "Unknown"
+                    phrase_info["russian_cefr_confidence"] = 0.0
+                    continue
+                cefr_level = max(cefr_dist, key=cefr_dist.get)
+                phrase_info["russian_cefr_level"] = cefr_level
+                phrase_info["russian_cefr_confidence"] = float(cefr_dist.get(cefr_level, 0.0))
+        else:
+            for phrase_info in phrase_data:
+                phrase_info["russian_cefr_level"] = "Unknown"
+                phrase_info["russian_cefr_confidence"] = 0.0
+    else:
+        for phrase_info in phrase_data:
+            phrase_info["russian_cefr_level"] = "Unknown"
+            phrase_info["russian_cefr_confidence"] = 0.0
+
     two_to_one = phrase_data
 
     return two_to_one

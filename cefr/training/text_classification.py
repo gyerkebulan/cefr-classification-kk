@@ -31,6 +31,7 @@ class TextClassificationConfig:
         "random_state",
         "max_features",
         "ngram_max",
+        "include_english_text",
         "include_russian_text",
     )
 
@@ -42,6 +43,7 @@ class TextClassificationConfig:
         random_state=42,
         max_features=5000,
         ngram_max=2,
+        include_english_text=True,
         include_russian_text=True,
     ):
         self.dataset_path = Path(dataset_path)
@@ -50,42 +52,68 @@ class TextClassificationConfig:
         self.random_state = random_state
         self.max_features = max_features
         self.ngram_max = ngram_max
+        self.include_english_text = include_english_text
         self.include_russian_text = include_russian_text
 
 
-def _ensure_required_columns(df):
-    missing = [col for col in (TEXT_EN_COLUMN, LABEL_COLUMN) if col not in df.columns]
+def _ensure_required_columns(df, *, require_english, require_russian):
+    required = [LABEL_COLUMN]
+    if require_english:
+        required.append(TEXT_EN_COLUMN)
+    if require_russian:
+        required.append(TEXT_RU_COLUMN)
+    missing = [col for col in required if col not in df.columns]
     if missing:
         joined = ", ".join(missing)
         raise ValueError(f"Dataset missing required columns: {joined}")
+    if TEXT_EN_COLUMN not in df.columns:
+        df[TEXT_EN_COLUMN] = ""
     if TEXT_RU_COLUMN not in df.columns:
         df[TEXT_RU_COLUMN] = ""
 
 
-def _load_dataset(path):
+def _load_dataset(path, *, require_english, require_russian):
     if not path.exists():
         raise FileNotFoundError(f"Dataset not found at {path}")
     df = pd.read_csv(path)
-    _ensure_required_columns(df)
+    _ensure_required_columns(
+        df,
+        require_english=require_english,
+        require_russian=require_russian,
+    )
     df = df.dropna(subset=[LABEL_COLUMN])
     df[TEXT_EN_COLUMN] = df[TEXT_EN_COLUMN].fillna("")
     df[TEXT_RU_COLUMN] = df[TEXT_RU_COLUMN].fillna("")
     return df
 
 
-def _compute_feature_frame(df):
-    english_feats = _features_from_series(df[TEXT_EN_COLUMN], prefix="en")
-    russian_feats = _features_from_series(df[TEXT_RU_COLUMN], prefix="ru")
-    combined = pd.concat([english_feats, russian_feats], axis=1)
-    combined["aligned_token_ratio"] = _safe_ratio(
-        english_feats["en_token_count"], russian_feats["ru_token_count"]
-    )
-    combined["aligned_sentence_ratio"] = _safe_ratio(
-        english_feats["en_sentence_count"], russian_feats["ru_sentence_count"]
-    )
-    combined["syllable_ratio"] = _safe_ratio(
-        english_feats["en_syllable_count"], russian_feats["ru_syllable_count"]
-    )
+def _compute_feature_frame(df, *, include_english, include_russian):
+    frames = []
+    english_feats = None
+    russian_feats = None
+
+    if include_english:
+        english_feats = _features_from_series(df[TEXT_EN_COLUMN], prefix="en")
+        frames.append(english_feats)
+    if include_russian:
+        russian_feats = _features_from_series(df[TEXT_RU_COLUMN], prefix="ru")
+        frames.append(russian_feats)
+
+    if frames:
+        combined = pd.concat(frames, axis=1)
+    else:
+        combined = pd.DataFrame(index=df.index)
+
+    if english_feats is not None and russian_feats is not None:
+        combined["aligned_token_ratio"] = _safe_ratio(
+            english_feats["en_token_count"], russian_feats["ru_token_count"]
+        )
+        combined["aligned_sentence_ratio"] = _safe_ratio(
+            english_feats["en_sentence_count"], russian_feats["ru_sentence_count"]
+        )
+        combined["syllable_ratio"] = _safe_ratio(
+            english_feats["en_syllable_count"], russian_feats["ru_syllable_count"]
+        )
     return combined
 
 
@@ -158,21 +186,35 @@ def _build_model(
 def _prepare_training_frame(
     df,
     *,
+    include_english,
     include_russian,
 ):
-    features = _compute_feature_frame(df)
+    features = _compute_feature_frame(
+        df,
+        include_english=include_english,
+        include_russian=include_russian,
+    )
     df_reset = df.reset_index(drop=True)
     combined = pd.concat([df_reset, features], axis=1)
-    text_columns = [TEXT_EN_COLUMN]
+    text_columns = []
+    if include_english:
+        text_columns.append(TEXT_EN_COLUMN)
     if include_russian and TEXT_RU_COLUMN in combined.columns:
         text_columns.append(TEXT_RU_COLUMN)
+    if not text_columns:
+        raise ValueError("At least one language column must be included for training.")
     return combined, text_columns, list(features.columns)
 
 
 def train_text_classifier(config):
-    df = _load_dataset(config.dataset_path)
+    df = _load_dataset(
+        config.dataset_path,
+        require_english=config.include_english_text,
+        require_russian=config.include_russian_text,
+    )
     training_frame, text_columns, numeric_columns = _prepare_training_frame(
         df,
+        include_english=config.include_english_text,
         include_russian=config.include_russian_text,
     )
 
@@ -220,6 +262,7 @@ def train_text_classifier(config):
                     "random_state": config.random_state,
                     "max_features": config.max_features,
                     "ngram_max": config.ngram_max,
+                    "include_english_text": config.include_english_text,
                     "include_russian_text": config.include_russian_text,
                 },
             },
@@ -277,6 +320,11 @@ def parse_args(args=None):
         help="Longest n-gram size to use for TF-IDF features.",
     )
     parser.add_argument(
+        "--no-english-text",
+        action="store_true",
+        help="Disable English text inputs (train on Russian only).",
+    )
+    parser.add_argument(
         "--no-russian-text",
         action="store_true",
         help="Disable Russian text inputs (train on English only).",
@@ -289,6 +337,7 @@ def parse_args(args=None):
         random_state=parsed.random_state,
         max_features=parsed.max_features,
         ngram_max=parsed.ngram_max,
+        include_english_text=not parsed.no_english_text,
         include_russian_text=not parsed.no_russian_text,
     )
 

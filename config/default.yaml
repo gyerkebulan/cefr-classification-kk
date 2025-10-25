@@ -10,4 +10,6 @@ pipeline:
   russian_cefr_path: data/cefr/russian_cefr_sample.csv
   russian_model_dir: models/ru_cefr_sentence
   russian_weight: 0.6
+  word_model_dir: models/transformer_word_cefr
+  word_model_device: null
 use_ensemble: false

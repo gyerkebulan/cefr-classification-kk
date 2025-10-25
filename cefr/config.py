@@ -28,6 +28,8 @@ class PipelineConfig:
     russian_cefr_path: str = "data/cefr/russian_cefr_sample.csv"
     russian_model_dir: str | None = "models/ru_cefr_sentence"
     russian_weight: float = 0.6
+    word_model_dir: str | None = "models/transformer_word_cefr"
+    word_model_device: str | int | None = None
 
 
 @dataclass(slots=True)

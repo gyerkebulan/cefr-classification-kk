@@ -4,9 +4,12 @@ import argparse
 import json
 import sys
 
+from pathlib import Path
+
 from cefr import load_config
 from cefr.pipeline import TextPipeline
 from cefr.text_utils import tokenize_words
+from cefr.data.silver import build_silver_labels
 from cefr.training import (
     TextClassificationConfig,
     WordTransformerConfig,
@@ -66,23 +69,38 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     train_word.add_argument(
         "--dataset-path",
-        default="data/cefr/russian_cefr_sample.csv",
-        help="CSV with columns 'word' (or custom text column) and CEFR labels.",
+        default="data/labels/silver_word_labels.csv",
+        help="CSV containing silver word labels (columns 'rus_item' and 'cefr').",
     )
     train_word.add_argument(
         "--output-dir",
-        default="models/russian_word_cefr",
+        default="models/transformer_word_cefr",
         help="Directory where the fitted model and tokenizer will be stored.",
     )
     train_word.add_argument(
         "--text-column",
-        default="word",
+        default="rus_item",
         help="Name of the column containing the token text.",
     )
     train_word.add_argument(
         "--label-column",
-        default="level",
+        default="cefr",
         help="Name of the column containing CEFR labels.",
+    )
+    train_word.add_argument(
+        "--parallel-path",
+        default="data/parallel/kazparc_kz_ru.csv",
+        help="Parallel corpus used to (re)generate silver labels when needed.",
+    )
+    train_word.add_argument(
+        "--russian-cefr",
+        default=None,
+        help="Optional override for the Russian CEFR lexicon CSV.",
+    )
+    train_word.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="Regenerate silver labels before training, even if the dataset already exists.",
     )
     train_word.add_argument("--test-size", type=float, default=0.2, help="Validation split size.")
     train_word.add_argument("--random-state", type=int, default=42, help="Random seed for splits.")
@@ -105,10 +123,34 @@ def _build_parser() -> argparse.ArgumentParser:
         default=64,
         help="Per-device batch size for evaluation.",
     )
-    train_word.add_argument("--learning-rate", type=float, default=3e-5, help="Initial learning rate.")
+    train_word.add_argument("--learning-rate", type=float, default=2e-5, help="Initial learning rate.")
     train_word.add_argument("--weight-decay", type=float, default=0.01, help="Weight decay coefficient.")
-    train_word.add_argument("--warmup-ratio", type=float, default=0.06, help="Warmup ratio for scheduler.")
+    train_word.add_argument("--warmup-ratio", type=float, default=0.1, help="Warmup ratio for scheduler.")
     train_word.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
+
+    silver = subparsers.add_parser(
+        "silver",
+        help="Generate silver word-level CEFR labels from a parallel corpus.",
+    )
+    silver.add_argument(
+        "--size",
+        default=10000
+    )
+    silver.add_argument(
+        "--parallel-path",
+        default="data/parallel/kazparc_kz_ru.csv",
+        help="Parallel corpus CSV with columns 'kaz' and 'rus'.",
+    )
+    silver.add_argument(
+        "--output-path",
+        default="data/labels/silver_word_labels.csv",
+        help="Where to write the generated silver labels CSV.",
+    )
+    silver.add_argument(
+        "--russian-cefr",
+        default=None,
+        help="Optional path to the Russian CEFR lexicon CSV (defaults to config pipeline setting).",
+    )
 
     train_text = subparsers.add_parser(
         "train-text",
@@ -139,9 +181,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Maximum n-gram length for TF-IDF extraction.",
     )
     train_text.add_argument(
-        "--no-russian-text",
+        "--include-english-text",
         action="store_true",
-        help="Ignore Russian text column during training (use English only).",
+        help="Include English text features alongside Russian during training.",
     )
     train_text.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
 
@@ -213,8 +255,29 @@ def _run_text(pipeline: TextPipeline, args: argparse.Namespace) -> dict:
 
 
 def _run_train_word(args: argparse.Namespace) -> dict:
+    dataset_path = Path(args.dataset_path)
+    if args.rebuild or not dataset_path.exists():
+        parallel_path = Path(args.parallel_path)
+        if not parallel_path.exists():
+            raise FileNotFoundError(
+                f"Parallel corpus not found at {parallel_path}. Provide --parallel-path or disable --rebuild."
+            )
+        cfg = load_config()
+        pipeline = TextPipeline(config=cfg.pipeline)
+        russian_cefr = Path(args.russian_cefr) if args.russian_cefr else Path(cfg.pipeline.russian_cefr_path)
+        dataset_path.parent.mkdir(parents=True, exist_ok=True)
+        build_silver_labels(
+            parallel_csv=parallel_path,
+            rus_cefr=russian_cefr,
+            out_csv=dataset_path,
+            aligner=pipeline.aligner,
+            alignment_config=cfg.pipeline.alignment,
+        )
+    if not dataset_path.exists():
+        raise FileNotFoundError(f"Silver labels not found at {dataset_path}")
+
     config = WordTransformerConfig(
-        dataset_path=args.dataset_path,
+        dataset_path=dataset_path,
         output_dir=args.output_dir,
         text_column=args.text_column,
         label_column=args.label_column,
@@ -233,6 +296,7 @@ def _run_train_word(args: argparse.Namespace) -> dict:
 
 
 def _run_train_text(args: argparse.Namespace) -> dict:
+    include_english_text = getattr(args, "include_english_text", False)
     config = TextClassificationConfig(
         dataset_path=args.dataset_path,
         output_dir=args.output_dir,
@@ -240,13 +304,36 @@ def _run_train_text(args: argparse.Namespace) -> dict:
         random_state=args.random_state,
         max_features=args.max_features,
         ngram_max=args.ngram_max,
-        include_russian_text=not args.no_russian_text,
+        include_english_text=include_english_text,
+        include_russian_text=True,
     )
     result = train_text_classifier(config)
     return {
         "model_path": result["model_path"],
         "metrics_path": result["metrics_path"],
         "accuracy": result["accuracy"],
+    }
+
+
+def _run_generate_silver(args: argparse.Namespace) -> dict:
+    cfg = load_config()
+    pipeline = TextPipeline(config=cfg.pipeline)
+    parallel_path = Path(args.parallel_path)
+    if not parallel_path.exists():
+        raise FileNotFoundError(f"Parallel corpus not found at {parallel_path}")
+    output_path = Path(args.output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    russian_cefr = Path(args.russian_cefr) if args.russian_cefr else Path(cfg.pipeline.russian_cefr_path)
+    build_silver_labels(
+        parallel_csv=parallel_path,
+        rus_cefr=russian_cefr,
+        out_csv=output_path,
+        aligner=pipeline.aligner,
+        alignment_config=cfg.pipeline.alignment,
+        size = args.size,
+    )
+    return {
+        "output_path": str(output_path),
     }
 
 
@@ -258,6 +345,8 @@ def main(argv: list[str] | None = None) -> int:
         result = _run_train_word(args)
     elif args.command == "train-text":
         result = _run_train_text(args)
+    elif args.command == "silver":
+        result = _run_generate_silver(args)
     else:
         config = load_config()
         pipeline = TextPipeline(config=config.pipeline)

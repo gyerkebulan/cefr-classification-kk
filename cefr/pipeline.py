@@ -7,7 +7,8 @@ from cefr.alignment import (
 )
 from cefr.config import PipelineConfig
 from cefr.data import RussianCefrRepository
-from cefr.models import RuSentenceCefrModel
+from cefr.models import RuSentenceCefrModel, predict_word_batch
+from cefr.models.word_transformer import DEFAULT_MODEL_DIR as DEFAULT_WORD_MODEL_DIR
 from cefr.scoring import CefrScorer
 from cefr.translation import get_translator
 from cefr.text_utils import tokenize_words
@@ -49,6 +50,32 @@ class TextPrediction:
         level = alignment.cefr
         confidence = float(self.distribution.get(level, 0.0))
         return level, confidence, alignment
+
+
+class WordCefrPrediction:
+    __slots__ = ("translation", "words", "probabilities")
+
+    def __init__(self, translation, words, probabilities):
+        self.translation = translation
+        self.words = tuple(words)
+        self.probabilities = tuple(
+            {level: float(prob) for level, prob in distribution.items()}
+            for distribution in probabilities
+        )
+
+    def iter_probabilities(self):
+        for word, distribution in zip(self.words, self.probabilities):
+            yield word, distribution
+
+    def top_levels(self):
+        results = []
+        for word, distribution in self.iter_probabilities():
+            if not distribution:
+                results.append((word, None, 0.0))
+                continue
+            level = max(distribution, key=distribution.get)
+            results.append((word, level, distribution[level]))
+        return tuple(results)
 
 
 class TextPipeline:
@@ -105,6 +132,41 @@ class TextPipeline:
                         )
                     )
         return word_alignments
+
+
+class WordCefrPipeline:
+    """Translate Kazakh text and score Russian tokens with the word-level CEFR model."""
+
+    def __init__(
+        self,
+        *,
+        config=None,
+        translator=None,
+        model_dir=None,
+        device=None,
+    ):
+        self.config = config or PipelineConfig()
+        translator_config = self.config.translator
+        self.translator = translator or get_translator(translator_config)
+        resolved_model_dir = model_dir or self.config.word_model_dir or DEFAULT_WORD_MODEL_DIR
+        self.model_dir = Path(resolved_model_dir)
+        resolved_device = device if device is not None else self.config.word_model_device
+        if isinstance(resolved_device, int):
+            resolved_device = f"cuda:{resolved_device}"
+        self.device = resolved_device
+
+    def predict(self, kazakh_text, *, russian_text=None):
+        translation = russian_text or self.translator.translate(kazakh_text)
+        words = tokenize_words(translation)
+        if not words:
+            raise ValueError("Translated Russian text produced no tokens to score.")
+        probabilities = predict_word_batch(
+            words,
+            model_dir=self.model_dir,
+            device=self.device,
+            return_probabilities=True,
+        )
+        return WordCefrPrediction(translation, words, probabilities)
 
 
 class EnsemblePrediction:
@@ -192,6 +254,8 @@ class EnsemblePipeline:
 __all__ = [
     "TextPipeline",
     "TextPrediction",
+    "WordCefrPipeline",
+    "WordCefrPrediction",
     "EnsemblePipeline",
     "EnsemblePrediction",
 ]

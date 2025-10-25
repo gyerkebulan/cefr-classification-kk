@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+from tqdm.auto import tqdm
 
 try:
     import pymorphy3 as pymorphy
@@ -29,6 +30,7 @@ def build_silver_labels(
     aligner=None,
     alignment_config=None,
     skip_non_informative=True,
+    size: int | None = None,
 ):
     parallel_csv = Path(parallel_csv)
     rus_cefr = Path(rus_cefr)
@@ -36,6 +38,8 @@ def build_silver_labels(
     out_csv.parent.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(parallel_csv)
+    if size is not None:
+        df = df.iloc[:size]
     repo = RussianCefrRepository(rus_cefr)
     mapping = repo.mapping
 
@@ -46,7 +50,8 @@ def build_silver_labels(
     rows = []
     skipped_sequences = 0
 
-    for sample in df.itertuples(index=False):
+    iterator = tqdm(df.itertuples(index=False), total=len(df), desc="Silver alignments")
+    for sample in iterator:
         kazakh = str(getattr(sample, "kaz", "")).strip()
         russian = str(getattr(sample, "rus", "")).strip()
         kz_words = tokenize_words(kazakh)

@@ -24,8 +24,8 @@ CEFR_LEVELS: Sequence[str] = ("A1", "A2", "B1", "B2", "C1", "C2")
 class WordTransformerConfig:
     dataset_path: Path
     output_dir: Path
-    text_column: str = "word"
-    label_column: str = "level"
+    text_column: str = "rus_item"
+    label_column: str = "cefr"
     model_name: str = "cointegrated/rubert-tiny2"
     test_size: float = 0.2
     random_state: int = 42
@@ -33,9 +33,9 @@ class WordTransformerConfig:
     epochs: int = 5
     train_batch_size: int = 32
     eval_batch_size: int = 64
-    learning_rate: float = 3e-5
+    learning_rate: float = 2e-5
     weight_decay: float = 0.01
-    warmup_ratio: float = 0.06
+    warmup_ratio: float = 0.1
 
     def __post_init__(self) -> None:
         self.dataset_path = Path(self.dataset_path)
@@ -56,8 +56,13 @@ def _load_dataframe(config: WordTransformerConfig) -> pd.DataFrame:
     df = df[df[config.text_column] != ""]
     df[config.label_column] = df[config.label_column].astype(str).str.upper()
     df = df[df[config.label_column].isin(CEFR_LEVELS)]
+    counts = df[config.label_column].value_counts()
+    valid_labels = counts[counts >= 2].index
+    df = df[df[config.label_column].isin(valid_labels)]
     if df.empty:
         raise RuntimeError("No usable rows after filtering. Check dataset contents.")
+    if df[config.label_column].nunique() < 2:
+        raise RuntimeError("Need at least two CEFR classes with >=2 samples to train.")
     return df.rename(columns={config.text_column: "text", config.label_column: "label"})
 
 
@@ -140,7 +145,7 @@ def train_word_transformer(config: WordTransformerConfig) -> dict[str, object]:
         evaluation_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
-        metric_for_best_model="macro_f1",
+        metric_for_best_model="eval_macro_f1",
         greater_is_better=True,
         save_total_limit=2,
         logging_steps=20,

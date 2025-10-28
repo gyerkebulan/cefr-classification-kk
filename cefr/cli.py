@@ -198,6 +198,15 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include English text features alongside Russian during training.",
     )
+    train_text.add_argument(
+        "--word-model-dir",
+        help="Directory containing the word-level CEFR model used for token distributions.",
+    )
+    train_text.add_argument(
+        "--no-word-distribution",
+        action="store_true",
+        help="Disable word-level CEFR distribution features during training.",
+    )
     train_text.add_argument("--pretty", action="store_true", help="Pretty-print JSON output.")
 
     return parser
@@ -335,6 +344,15 @@ def _run_train_word(args: argparse.Namespace) -> dict:
 
 def _run_train_text(args: argparse.Namespace) -> dict:
     include_english_text = getattr(args, "include_english_text", False)
+    include_word_distribution = not getattr(args, "no_word_distribution", False)
+    cfg = load_config()
+    resolved_word_model_dir = args.word_model_dir or cfg.pipeline.word_model_dir
+    if include_word_distribution and not resolved_word_model_dir:
+        raise SystemExit(
+            "Word-level CEFR model directory is required for word distribution features. "
+            "Provide --word-model-dir or disable with --no-word-distribution."
+        )
+    word_model_path = Path(resolved_word_model_dir) if resolved_word_model_dir else None
     config = TextClassificationConfig(
         dataset_path=args.dataset_path,
         output_dir=args.output_dir,
@@ -344,6 +362,8 @@ def _run_train_text(args: argparse.Namespace) -> dict:
         ngram_max=args.ngram_max,
         include_english_text=include_english_text,
         include_russian_text=True,
+        include_word_distribution=include_word_distribution,
+        word_model_dir=word_model_path,
     )
     result = train_text_classifier(config)
     return {

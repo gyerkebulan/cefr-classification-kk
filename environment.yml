@@ -4,22 +4,19 @@ channels:
   - pytorch
   - defaults
 dependencies:
-  - python=3.10
+  - python
   - pip
   - pytorch
   - torchvision
-  - torchaudio
   - pandas
   - numpy
   - scikit-learn
   - tqdm
   - sentencepiece
+  - joblib
+  - pyyaml
   - pip:
-      - transformers==4.43.3
+      - transformers
       - datasets
-      - gradio
-      - awesome-align
-      - simalign
-      - python-dotenv
       - pymorphy2
       - pymorphy3

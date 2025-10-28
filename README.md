@@ -1,64 +1,90 @@
-# CEFR Pipelines for Kazakh ↔ Russian
+# CEFR‑пайплайны для казахско‑русского корпуса
 
-This project bundles three practical pipelines that operate on Kazakh↔Russian text pairs:
-
-1. **Alignment CLI** – return token alignments with probabilities.
-2. **Word CEFR CLI** – predict the CEFR level for a single Kazakh token.
-3. **Text CEFR CLI** – infer the CEFR level of a Kazakh passage.
-
-Each action is exposed as a one‑liner script and can also be invoked from Python.
+Набор инструментов для оценки уровней CEFR в казахских текстах через русский «пивот». Пайплайн переводит Kaz→Ru (`issai/tilmash`), выравнивает токены (awesome-align), ищет CEFR по русскому лексикону и при необходимости добавляет трансформерные модели: word‑классификатор и TF-IDF текстовый классификатор. Всё доступно через CLI и Python; параметры задаются в `config/default.yaml`.
 
 ---
 
-## Quick CLI Reference
+## Установка и зависимости
 
 ```bash
-# 1) High-confidence Kazakh bigrams aligned to a single Russian token
-python -m cefr.cli align --kaz-text "Ол кітап оқып жатыр" --rus-text "Он читает книгу"
-# Outputs rows with: kazakh_phrase, russian_token, kazakh_span, russian_index, alignment_conf (confidence ≥ 0.8 by default)
-
-# 2) Kazakh word CEFR classification
-python -m cefr.cli word --kaz-word "кітап"
-# (kaz_word, cefr_level, confidence)
-
-# 3) Kazakh text CEFR classification
-python -m cefr.cli text --kaz-text "Ол кітап оқып жатыр. Бүгін мектепте жаңа тақырып өткен." # TODO: --rus-text 
-# (kaz_text, cefr_level, confidence)
-
-# 4) Generate silver word labels (optional)
-python -m cefr.cli silver --parallel-path data/parallel/kazparc_kz_ru.csv --output-path data/labels/silver_word_labels.csv
-
-# 5) Train word-level CEFR classifier (silver labels)
-python -m cefr.cli train-word --dataset-path data/labels/silver_word_labels.csv --output-dir models/transformer_word_cefr --rebuild
-
-# 6) Train text-level CEFR classifier (bilingual model)
-python -m cefr.cli train-text
+conda env create -f environment.yml
+conda activate kazakh_cefr_env
 ```
 
-If `--rus-text` / `--rus-word` is omitted, the built-in translator will generate a Russian counterpart automatically (requires the translation model defined in the config).
+Для закрытых HF‑моделей выполните `huggingface-cli login`.
 
-Use `--pretty` to format JSON output.
+---
 
-The training commands rely on Hugging Face models/datasets. Ensure you have a valid token for any gated models (e.g. `cointegrated/rubert-tiny2`) and install the extras:
+## Быстрый обзор пайплайна
+
+1. Казахский текст переводится в русский (`issai/tilmash`).
+2. `EmbeddingAligner` строит пары токенов Kaz↔Ru.
+3. `CefrScorer` проверяет русские токены по словарю CEFR (lemmas → уровень).
+4. Дополнительно доступны:
+   - `WordCefrPipeline` — трансформер по русским токенам (`models/transformer_word_cefr`).
+   - `EnsemblePipeline` — объединение лексиконного и sentence‑классификатора.
+5. Любая стадия конфигурируется и вызывается из `TextPipeline` или напрямую.
+
+---
+
+## CLI
 
 ```bash
-pip install transformers datasets
+python -m cefr.cli align --kaz-text "..." [--rus-text "..."]   # выравнивание токенов + метрики
+python -m cefr.cli word --kaz-word "..." [--rus-word "..."]    # уровень конкретного слова
+python -m cefr.cli text --kaz-text "..." [--rus-text "..."]    # распределение уровней для текста
+python -m cefr.cli silver --parallel-path data/parallel/...    # генерация «серебряных» меток
+python -m cefr.cli train-word --dataset-path data/labels/...   # обучение word-transformer
+python -m cefr.cli train-text --dataset-path data/text/...     # обучение TF-IDF классификатора
 ```
 
-The word-level trainer consumes the silver labels in `data/labels/silver_word_labels.csv`. Regenerate them with `python -m cefr.cli silver --rebuild` after extending the parallel corpus or Russian CEFR lexicon, then rerun `train-word` to refresh the transformer model.
+Все команды используют конфиг из `config/default.yaml`; добавьте `--pretty` для форматированного вывода. Используйте `--rus-text` / `--rus-word`, если хотите подать собственный перевод.
 
-### Word-level transformer inference
+---
+
+## Python‑API
+
+```python
+from cefr import load_config, TextPipeline
+
+cfg = load_config()
+pipeline = TextPipeline(config=cfg.pipeline)
+result = pipeline.predict("Ол мектепке бара жатыр.")
+print(result.average_level)          # средний уровень
+print(result.word_alignment_tuples)  # [(kaz, rus, idx_kz, idx_ru, cefr), ...]
+```
 
 ```python
 from pathlib import Path
-from cefr.models.word_transformer import predict_word_level, predict_word_distribution
+from cefr.models.word_transformer import predict_word_distribution
 
-model_dir = Path("models/transformer_word_cefr")
-
-print(predict_word_level("пример", model_dir=model_dir))
-print(predict_word_distribution("пример", model_dir=model_dir))
+dist = predict_word_distribution("пример", model_dir=Path("models/transformer_word_cefr"))
+print(dist)  # {'A1': ..., 'A2': ..., ...}
 ```
 
-## License
+---
 
-This project is intended for research use. Respect the licenses of all datasets and upstream models.
+## Данные и артефакты
+
+- `data/parallel/kazparc_kz_ru.csv` — исходный параллельный корпус.
+- `data/labels/silver_word_labels.csv` — авторазметка русских токенов уровнями CEFR.
+- `data/cefr/russian_cefr_sample.csv` — словарь «слово → уровень».
+- `models/transformer_word_cefr/` — обученный word‑трансформер и метрики.
+- `models/text_classifier/` — TF-IDF классификатор текстов и отчёт.
+
+---
+
+## Настройки и обучение
+
+- Настраивайте переводчик, выравниватель, пути к моделям и веса ансамбля через `config/default.yaml` или `load_config(path=...)`.
+- Обновляйте серебряные метки перед обучением трансформера (`python -m cefr.cli silver --rebuild`).
+- После `train-word` или `train-text` смотрите JSON‑метрики в соответствующих каталогах `models/...`.
+- `train-text` автоматически добавляет признаки распределения CEFR по токенам (используется модель из `--word-model-dir`, по умолчанию `models/transformer_word_cefr`).
+
+---
+
+## Тесты
+
+```bash
+pytest
+```

@@ -1,5 +1,6 @@
 import json
 import argparse
+from collections import Counter
 from pathlib import Path
 import pandas as pd
 from joblib import dump
@@ -17,6 +18,8 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
 from cefr.text_features import compute_text_features
+from cefr.text_utils import tokenize_words
+from cefr.models import WORD_CEFR_LEVELS, predict_word_batch
 
 TEXT_EN_COLUMN = "text_en"
 TEXT_RU_COLUMN = "text_ru"
@@ -33,6 +36,8 @@ class TextClassificationConfig:
         "ngram_max",
         "include_english_text",
         "include_russian_text",
+        "include_word_distribution",
+        "word_model_dir",
     )
 
     def __init__(
@@ -45,6 +50,8 @@ class TextClassificationConfig:
         ngram_max=2,
         include_english_text=True,
         include_russian_text=True,
+        include_word_distribution=True,
+        word_model_dir=None,
     ):
         self.dataset_path = Path(dataset_path)
         self.output_dir = Path(output_dir)
@@ -54,6 +61,8 @@ class TextClassificationConfig:
         self.ngram_max = ngram_max
         self.include_english_text = include_english_text
         self.include_russian_text = include_russian_text
+        self.include_word_distribution = include_word_distribution
+        self.word_model_dir = Path(word_model_dir) if word_model_dir is not None else None
 
 
 def _ensure_required_columns(df, *, require_english, require_russian):
@@ -87,10 +96,18 @@ def _load_dataset(path, *, require_english, require_russian):
     return df
 
 
-def _compute_feature_frame(df, *, include_english, include_russian):
+def _compute_feature_frame(
+    df,
+    *,
+    include_english,
+    include_russian,
+    include_word_distribution,
+    word_model_dir,
+):
     frames = []
     english_feats = None
     russian_feats = None
+    word_cefr_feats = None
 
     if include_english:
         english_feats = _features_from_series(df[TEXT_EN_COLUMN], prefix="en")
@@ -98,6 +115,17 @@ def _compute_feature_frame(df, *, include_english, include_russian):
     if include_russian:
         russian_feats = _features_from_series(df[TEXT_RU_COLUMN], prefix="ru")
         frames.append(russian_feats)
+    if include_word_distribution:
+        if word_model_dir is None:
+            raise ValueError(
+                "word_model_dir must be provided when include_word_distribution is True."
+            )
+        target_series = df[TEXT_RU_COLUMN] if TEXT_RU_COLUMN in df.columns else pd.Series(
+            ["" for _ in range(len(df))],
+            index=df.index,
+        )
+        word_cefr_feats = _word_distribution_features(target_series, word_model_dir)
+        frames.append(word_cefr_feats)
 
     if frames:
         combined = pd.concat(frames, axis=1)
@@ -121,6 +149,81 @@ def _features_from_series(series, *, prefix):
     features = series.astype(str).apply(lambda text: compute_text_features(text).as_dict())
     frame = pd.DataFrame(features.tolist())
     frame.columns = [f"{prefix}_{column}" for column in frame.columns]
+    return frame
+
+
+def _empty_word_feature_row():
+    feature_row = {
+        **{f"word_cefr_prob_{level}": 0.0 for level in WORD_CEFR_LEVELS},
+        **{f"word_cefr_ratio_{level}": 0.0 for level in WORD_CEFR_LEVELS},
+        "word_cefr_token_count": 0.0,
+    }
+    return feature_row
+
+
+def _word_distribution_features(series, model_dir):
+    model_path = Path(model_dir)
+    if not model_path.exists():
+        raise FileNotFoundError(
+            f"Word-level CEFR model not found at {model_path}. "
+            "Train it via `python -m cefr.cli train-word` or disable word distribution features."
+        )
+
+    rows = []
+    for text in series.astype(str):
+        tokens = tokenize_words(text)
+        if not tokens:
+            rows.append(_empty_word_feature_row())
+            continue
+        try:
+            distributions = predict_word_batch(
+                tokens,
+                model_dir=model_path,
+                return_probabilities=True,
+            )
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(
+                f"Failed to load word-level CEFR model from {model_path}. "
+                "Ensure the model directory exists or disable word distribution features."
+            ) from exc
+
+        total = len(distributions)
+        if total == 0:
+            rows.append(_empty_word_feature_row())
+            continue
+
+        sum_probs = {level: 0.0 for level in WORD_CEFR_LEVELS}
+        top_counts = Counter()
+        for dist in distributions:
+            if not dist:
+                continue
+            top_level = max(dist, key=dist.get)
+            top_counts[top_level] += 1
+            for level in WORD_CEFR_LEVELS:
+                sum_probs[level] += float(dist.get(level, 0.0))
+
+        feature_row = {}
+        for level in WORD_CEFR_LEVELS:
+            feature_row[f"word_cefr_prob_{level}"] = (
+                sum_probs[level] / total if total else 0.0
+            )
+            feature_row[f"word_cefr_ratio_{level}"] = (
+                top_counts.get(level, 0) / total if total else 0.0
+            )
+        feature_row["word_cefr_token_count"] = float(total)
+        rows.append(feature_row)
+
+    frame = pd.DataFrame(rows, index=series.index)
+    # Ensure consistent column order even if dataframe was empty
+    for level in WORD_CEFR_LEVELS:
+        prob_col = f"word_cefr_prob_{level}"
+        ratio_col = f"word_cefr_ratio_{level}"
+        if prob_col not in frame.columns:
+            frame[prob_col] = 0.0
+        if ratio_col not in frame.columns:
+            frame[ratio_col] = 0.0
+    if "word_cefr_token_count" not in frame.columns:
+        frame["word_cefr_token_count"] = 0.0
     return frame
 
 
@@ -188,11 +291,15 @@ def _prepare_training_frame(
     *,
     include_english,
     include_russian,
+    include_word_distribution,
+    word_model_dir,
 ):
     features = _compute_feature_frame(
         df,
         include_english=include_english,
         include_russian=include_russian,
+        include_word_distribution=include_word_distribution,
+        word_model_dir=word_model_dir,
     )
     df_reset = df.reset_index(drop=True)
     combined = pd.concat([df_reset, features], axis=1)
@@ -207,6 +314,11 @@ def _prepare_training_frame(
 
 
 def train_text_classifier(config):
+    if config.include_word_distribution and config.word_model_dir is None:
+        raise ValueError(
+            "word_model_dir must be set when include_word_distribution is True. "
+            "Provide a trained word-level CEFR model or disable the feature."
+        )
     df = _load_dataset(
         config.dataset_path,
         require_english=config.include_english_text,
@@ -216,6 +328,8 @@ def train_text_classifier(config):
         df,
         include_english=config.include_english_text,
         include_russian=config.include_russian_text,
+        include_word_distribution=config.include_word_distribution,
+        word_model_dir=config.word_model_dir,
     )
 
     X = training_frame.drop(columns=[LABEL_COLUMN])
@@ -264,6 +378,8 @@ def train_text_classifier(config):
                     "ngram_max": config.ngram_max,
                     "include_english_text": config.include_english_text,
                     "include_russian_text": config.include_russian_text,
+                    "include_word_distribution": config.include_word_distribution,
+                    "word_model_dir": str(config.word_model_dir) if config.word_model_dir else None,
                 },
             },
             ensure_ascii=False,
@@ -329,6 +445,17 @@ def parse_args(args=None):
         action="store_true",
         help="Disable Russian text inputs (train on English only).",
     )
+    parser.add_argument(
+        "--word-model-dir",
+        type=Path,
+        default=Path("models/transformer_word_cefr"),
+        help="Directory containing the word-level CEFR model used for token distributions.",
+    )
+    parser.add_argument(
+        "--no-word-distribution",
+        action="store_true",
+        help="Disable word-level CEFR distribution features.",
+    )
     parsed = parser.parse_args(args=args)
     return TextClassificationConfig(
         dataset_path=parsed.dataset_path,
@@ -339,6 +466,8 @@ def parse_args(args=None):
         ngram_max=parsed.ngram_max,
         include_english_text=not parsed.no_english_text,
         include_russian_text=not parsed.no_russian_text,
+        include_word_distribution=not parsed.no_word_distribution,
+        word_model_dir=parsed.word_model_dir,
     )
 
 

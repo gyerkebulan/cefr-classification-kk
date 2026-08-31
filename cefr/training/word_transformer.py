@@ -113,7 +113,13 @@ def _compute_metrics(eval_pred) -> dict[str, float]:
     preds = np.argmax(logits, axis=-1)
     levels = list(range(int(max(labels.max(), preds.max())) + 1))
     metrics = compute_cefr_metrics(labels, preds, levels=levels)
-    return {key: value for key, value in metrics.items() if key != "per_class"}
+    return {
+        key: metrics[key]
+        for key in (
+            "accuracy", "macro_f1", "within_1", "far_error_rate",
+            "ordinal_mae", "quadratic_weighted_kappa",
+        )
+    }
 
 
 def train_word_transformer(config: WordTransformerConfig) -> dict[str, object]:
@@ -165,7 +171,15 @@ def train_word_transformer(config: WordTransformerConfig) -> dict[str, object]:
     )
 
     trainer.train()
-    metrics = trainer.evaluate()
+    prediction_output = trainer.predict(tokenized_dataset["test"], metric_key_prefix="eval")
+    metrics = prediction_output.metrics
+    true_labels = [id2label[int(index)] for index in prediction_output.label_ids]
+    predicted_labels = [
+        id2label[int(index)] for index in prediction_output.predictions.argmax(axis=-1)
+    ]
+    detailed_metrics = compute_cefr_metrics(
+        true_labels, predicted_labels, levels=CEFR_LEVELS
+    )
 
     trainer.save_model(str(config.output_dir))
     tokenizer.save_pretrained(str(config.output_dir))
@@ -175,6 +189,7 @@ def train_word_transformer(config: WordTransformerConfig) -> dict[str, object]:
         json.dumps(
             {
                 "metrics": metrics,
+                "cefr_metrics": detailed_metrics,
                 "labels": label_list,
                 "config": {
                     "dataset_path": str(config.dataset_path),

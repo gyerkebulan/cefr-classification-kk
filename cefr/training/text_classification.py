@@ -8,11 +8,6 @@ from sklearn.compose import ColumnTransformer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import (
-    accuracy_score,
-    classification_report,
-    confusion_matrix,
-)
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -20,6 +15,7 @@ from sklearn.preprocessing import StandardScaler
 from cefr.text_features import compute_text_features
 from cefr.text_utils import tokenize_words
 from cefr.models import WORD_CEFR_LEVELS, predict_word_batch
+from cefr.metrics import compute_cefr_metrics
 
 TEXT_EN_COLUMN = "text_en"
 TEXT_RU_COLUMN = "text_ru"
@@ -347,15 +343,8 @@ def train_text_classifier(config):
     pipeline.fit(X_train, y_train)
 
     y_pred = pipeline.predict(X_val)
-    accuracy = float(accuracy_score(y_val, y_pred))
-    report = classification_report(
-        y_val,
-        y_pred,
-        zero_division=0,
-        output_dict=True,
-    )
-    labels = sorted(y.unique())
-    conf_mtx = confusion_matrix(y_val, y_pred, labels=labels).tolist()
+    metrics = compute_cefr_metrics(y_val, y_pred)
+    accuracy = metrics["accuracy"]
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
     model_path = config.output_dir / "text_classifier.joblib"
@@ -366,9 +355,7 @@ def train_text_classifier(config):
         json.dumps(
             {
                 "accuracy": accuracy,
-                "classification_report": report,
-                "labels": labels,
-                "confusion_matrix": conf_mtx,
+                **metrics,
                 "class_distribution": y.value_counts(normalize=True).to_dict(),
                 "config": {
                     "dataset_path": str(config.dataset_path),

@@ -7,10 +7,11 @@ from sklearn.compose import ColumnTransformer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+
+from cefr.metrics import compute_cefr_metrics
 
 
 TEXT_COLUMNS = ("kaz", "rus")
@@ -121,13 +122,8 @@ def train_tabular_model(config):
     pipeline.fit(X_train, y_train)
 
     y_pred = pipeline.predict(X_val)
-    accuracy = float(accuracy_score(y_val, y_pred))
-    report = classification_report(
-        y_val,
-        y_pred,
-        output_dict=True,
-        zero_division=0,
-    )
+    metrics = compute_cefr_metrics(y_val, y_pred)
+    accuracy = metrics["accuracy"]
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
     model_path = config.output_dir / "model.joblib"
@@ -138,8 +134,7 @@ def train_tabular_model(config):
         json.dumps(
             {
                 "accuracy": accuracy,
-                "classification_report": report,
-                "labels": sorted(set(y)),
+                **metrics,
                 "config": {
                     "train_path": str(config.train_path),
                     "test_size": config.test_size,

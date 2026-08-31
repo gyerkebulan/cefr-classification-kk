@@ -8,7 +8,6 @@ from typing import Sequence
 import numpy as np
 import pandas as pd
 from datasets import Dataset, DatasetDict
-from sklearn.metrics import f1_score
 from sklearn.model_selection import train_test_split
 from transformers import (
     AutoModelForSequenceClassification,
@@ -16,6 +15,8 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
+
+from cefr.metrics import compute_cefr_metrics
 
 CEFR_LEVELS: Sequence[str] = ("A1", "A2", "B1", "B2", "C1", "C2")
 
@@ -110,9 +111,9 @@ def _tokenize_dataset(dataset: DatasetDict, tokenizer: AutoTokenizer, max_length
 def _compute_metrics(eval_pred) -> dict[str, float]:
     logits, labels = eval_pred
     preds = np.argmax(logits, axis=-1)
-    accuracy = float((preds == labels).mean())
-    macro_f1 = f1_score(labels, preds, average="macro")
-    return {"accuracy": accuracy, "macro_f1": macro_f1}
+    levels = list(range(int(max(labels.max(), preds.max())) + 1))
+    metrics = compute_cefr_metrics(labels, preds, levels=levels)
+    return {key: value for key, value in metrics.items() if key != "per_class"}
 
 
 def train_word_transformer(config: WordTransformerConfig) -> dict[str, object]:

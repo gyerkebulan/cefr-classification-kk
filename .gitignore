@@ -1,3 +1,32 @@
+# Python
 __pycache__/
 *.py[cod]
+
+# OS / editor junk
+.DS_Store
+
+# secrets (HF_TOKEN etc.)
+.env
 ssh-agent.sh
+
+# local Claude config
+.claude/
+
+# generated intermediates and local research data
+artifacts/
+dataset/
+huggingface-dataset/
+results/
+models/
+combined_final.json
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+
+report/
+paper/
